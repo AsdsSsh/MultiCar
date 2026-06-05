@@ -1,0 +1,15 @@
+# 依赖
+node_modules
+
+# 构建产物
+dist
+dist-ssr
+
+# 本地环境
+*.local
+
+# 编辑器/系统
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+*.log

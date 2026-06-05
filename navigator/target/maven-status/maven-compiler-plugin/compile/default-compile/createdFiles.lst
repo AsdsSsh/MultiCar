@@ -1,0 +1,6 @@
+inspection\navigator\AStarPathFinder.class
+inspection\navigator\NavigatorAgent.class
+inspection\navigator\BfsPathFinder.class
+inspection\navigator\PathFinder.class
+inspection\navigator\NavigatorMain.class
+inspection\navigator\AStarPathFinder$Node.class
