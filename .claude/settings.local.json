@@ -8,7 +8,8 @@
       "Bash(tasklist)",
       "Bash(node *)",
       "Bash(netstat -ano)",
-      "Bash(curl *)"
+      "Bash(curl *)",
+      "Bash(mvn *)"
     ]
   }
 }

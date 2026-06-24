@@ -77,31 +77,29 @@ public class MessageBus {
         logger.debug("绑定队列 {} 到交换器 {}", queueName, exchangeName);
     }
 
-    /**
-     * 声明系统所有队列
-     */
-    public void declareAllSystemQueues(int carCount) throws IOException {
-        // 声明点对点队列
+    /** 声明共享队列（所有 session 共用，只需声明一次） */
+    public void declareSharedQueues() throws IOException {
         declareQueue(Constants.QUEUE_CONTROLLER_CMD);
         declareQueue(Constants.QUEUE_NAVIGATOR_CMD);
         declareQueue(Constants.QUEUE_TARGET_PLANNER_CMD);
         declareQueue(Constants.QUEUE_TASK_CONFIG_CMD);
+        logger.info("共享队列声明完成");
+    }
 
-        // 声明 Display 的刷新队列（提前创建，确保不会丢消息）
-        declareQueue("WSB_Refresh");
+    /** 声明指定 session 的队列（Fanout + 刷新队列 + 小车队列） */
+    public void declareSessionQueues(String sessionId, int carCount) throws IOException {
+        String fanoutExchange = Constants.getSessionFanoutExchange(sessionId);
+        String refreshQueue = Constants.getSessionRefreshQueue(sessionId);
 
-        // 声明小车队列
+        declareFanoutExchange(fanoutExchange);
+        declareQueue(refreshQueue);
+        bindQueueToFanout(refreshQueue, fanoutExchange);
+
         for (int i = 1; i <= carCount; i++) {
             declareQueue(Constants.getCarQueueName(String.format("Car%03d", i)));
         }
 
-        // 声明广播交换器
-        declareFanoutExchange(Constants.EXCHANGE_UPDATE_VIEW);
-
-        // 绑定 WSB_Refresh 到 UpdateView Fanout
-        bindQueueToFanout("WSB_Refresh", Constants.EXCHANGE_UPDATE_VIEW);
-
-        logger.info("系统队列声明完成，小车数: {}", carCount);
+        logger.info("Session {} 队列声明完成，小车数: {}", sessionId, carCount);
     }
 
     /**

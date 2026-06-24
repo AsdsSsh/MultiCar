@@ -15,18 +15,6 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Navigator 知识源 —— 路径规划器。
- *
- * 方案B接口规范：
- *   输入：订阅 NavigatorCmd 队列，接收 Controller 的 PLAN_ROUTE 命令
- *   处理：根据 algorithm 选择 BFS 或 A* 搜索路径
- *   输出：写入 Redis CarID:RouteList（lpush，⚠ 不写 Status）
- *        回复 ControllerCmd: ROUTE_PLANNED(carId, routeFound, routeLength)
- *   锁：  分布式锁 lock:CarID 保护 RouteList 清空+写入复合操作
- *
- *   关键约束：仅受 Controller 调度，不接受其他知识源的消息
- */
 public class NavigatorAgent implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(NavigatorAgent.class);
@@ -47,7 +35,6 @@ public class NavigatorAgent implements AutoCloseable {
         );
     }
 
-    /** 启动 Navigator：订阅 NavigatorCmd 队列，等待 Controller 命令 */
     public void start() throws IOException {
         log.info("=== Navigator starting ===");
         messageBus.declareKnowledgeSourceInput(Constants.QUEUE_NAVIGATOR_CMD);
@@ -62,93 +49,70 @@ public class NavigatorAgent implements AutoCloseable {
         log.info("Navigator ready — listening on '{}'", Constants.QUEUE_NAVIGATOR_CMD);
     }
 
-    /**
-     * 处理 PLAN_ROUTE 命令。
-     *
-     * 输入格式：
-     *   {"cmd":"PLAN_ROUTE","data":{"carId":"Car001","algorithm":"BFS"},"timestamp":...}
-     *
-     * 处理流程：
-     *   1. 加锁 lock:CarID
-     *   2. 从黑板读取 CarID:Position, CarID:Target, mapBlock, TaskConfig.algorithm
-     *   3. 根据 algorithm 选择 PathFinder
-     *   4. 执行路径搜索
-     *   5. 路径找到 → 写入黑板 RouteList（⚠ 不写 Status）
-     *   6. 路径未找到 → 不写任何状态
-     *   7. 释放锁
-     *   8. 通知 Controller ROUTE_PLANNED
-     */
     private void handlePlanRoute(JSONObject data) {
+        String sessionId = data.getString("sessionId");
         String carId = data.getString("carId");
         String algoStr = data.getString("algorithm");
         if (algoStr == null) algoStr = "BFS";
         RouteAlgorithm algorithm = RouteAlgorithm.valueOf(algoStr);
 
-        log.info("[Navigator] PLAN_ROUTE for {}, algorithm={}", carId, algorithm);
+        if (sessionId == null || sessionId.isEmpty()) {
+            log.warn("[Navigator] Missing sessionId, skip");
+            notifyController(null, carId, false, 0);
+            return;
+        }
 
-        // 加锁 → 读取黑板 → 搜索 → 写入 RouteList → 通知 Controller
-        boolean locked = distLock.executeWithCarLock(carId, () -> {
-            planRouteForCar(carId, algorithm);
+        log.info("[Navigator] PLAN_ROUTE session={} car={} algo={}", sessionId, carId, algorithm);
+
+        String lockKey = Constants.getLockKey(sessionId, carId);
+        boolean locked = distLock.executeWithLock(lockKey, Constants.LOCK_EXPIRE_MS, () -> {
+            planRouteForCar(sessionId, carId, algorithm);
         });
 
         if (!locked) {
-            log.warn("[Navigator] Failed to acquire lock for {}, skip", carId);
-            notifyController(carId, false, 0);
+            log.warn("[Navigator] Failed to acquire lock for {}:{}", sessionId, carId);
+            notifyController(sessionId, carId, false, 0);
         }
     }
 
-    /**
-     * 为指定小车执行路径规划（在分布式锁保护下调用）。
-     */
-    private void planRouteForCar(String carId, RouteAlgorithm algorithm) {
-        // 1. 从黑板读取数据
-        Point start = blackboard.getCarPosition(carId);
-        Point target = blackboard.getCarTarget(carId);
-        int mapWidth = blackboard.getMapWidth();
-        int mapHeight = blackboard.getMapHeight();
-        boolean[] mapBlock = blackboard.getFullMapBlock(mapWidth, mapHeight);
-        boolean[] mapView = blackboard.getFullMapView(mapWidth, mapHeight);
+    private void planRouteForCar(String sessionId, String carId, RouteAlgorithm algorithm) {
+        Point start = blackboard.getCarPosition(sessionId, carId);
+        Point target = blackboard.getCarTarget(sessionId, carId);
+        int mapWidth = blackboard.getMapWidth(sessionId);
+        int mapHeight = blackboard.getMapHeight(sessionId);
+        boolean[] mapBlock = blackboard.getFullMapBlock(sessionId, mapWidth, mapHeight);
+        boolean[] mapView = blackboard.getFullMapView(sessionId, mapWidth, mapHeight);
 
-        // 2. 参数校验
         if (start == null) {
-            log.warn("[Navigator] CarPosition is null for {}, skip", carId);
-            notifyController(carId, false, 0);
+            notifyController(sessionId, carId, false, 0);
             return;
         }
         if (target == null) {
-            log.warn("[Navigator] CarTarget is null for {}, skip", carId);
-            notifyController(carId, false, 0);
+            notifyController(sessionId, carId, false, 0);
             return;
         }
 
-        // 3. 将其他小车位置作为临时障碍加入（避免多车碰撞）
-        addOtherCarsAsObstacles(mapBlock, carId, mapWidth, mapHeight);
+        addOtherCarsAsObstacles(sessionId, mapBlock, carId, mapWidth, mapHeight);
 
-        // 4. 选择算法并搜索 → 传入 mapView 以实现视野约束
         PathFinder finder = pathFinders.getOrDefault(algorithm, pathFinders.get(RouteAlgorithm.BFS));
         List<Point> route = finder.findPath(start, target, mapWidth, mapHeight, mapBlock, mapView);
 
-        // 5. 写入黑板（⚠ 只写 RouteList，不写 Status）
         if (!route.isEmpty()) {
-            blackboard.setCarRouteList(carId, route);
-            log.info("[Navigator] {} route planned: {} steps", carId, route.size());
-            notifyController(carId, true, route.size());
+            blackboard.setCarRouteList(sessionId, carId, route);
+            log.info("[Navigator] {}:{} route planned: {} steps", sessionId, carId, route.size());
+            notifyController(sessionId, carId, true, route.size());
         } else {
-            // 路径未找到 —— 不写任何状态
-            log.warn("[Navigator] {} no route found from {} to {}", carId, start, target);
-            notifyController(carId, false, 0);
+            log.warn("[Navigator] {}:{} no route found", sessionId, carId);
+            notifyController(sessionId, carId, false, 0);
         }
     }
 
-    /**
-     * 将其他小车的当前位置加入障碍数组（作为临时障碍）
-     */
-    private void addOtherCarsAsObstacles(boolean[] mapBlock, String currentCarId, int mapWidth, int mapHeight) {
-        int carCount = blackboard.getCarCount();
+    private void addOtherCarsAsObstacles(String sessionId, boolean[] mapBlock, String currentCarId, int mapWidth, int mapHeight) {
+        int carCount = blackboard.getCarCount(sessionId);
         for (int i = 1; i <= carCount; i++) {
-            String otherCarId = String.format("Car%03d", i);
-            if (otherCarId.equals(currentCarId)) continue;
-            Point pos = blackboard.getCarPosition(otherCarId);
+            String otherId = String.format("Car%03d", i);
+            if (otherId.equals(currentCarId)) continue;
+            Point pos = blackboard.getCarPosition(sessionId, otherId);
             if (pos != null) {
                 int offset = pos.toBitmapOffset(mapWidth);
                 if (offset >= 0 && offset < mapBlock.length) {
@@ -158,14 +122,9 @@ public class NavigatorAgent implements AutoCloseable {
         }
     }
 
-    /**
-     * 通知 Controller 路径规划完成。
-     *
-     * 输出格式：
-     *   {"cmd":"ROUTE_PLANNED","data":{"carId":"Car001","routeFound":true,"routeLength":15},"timestamp":...}
-     */
-    private void notifyController(String carId, boolean routeFound, int routeLength) {
+    private void notifyController(String sessionId, String carId, boolean routeFound, int routeLength) {
         JSONObject data = new JSONObject();
+        data.put("sessionId", sessionId);
         data.put("carId", carId);
         data.put("routeFound", routeFound);
         data.put("routeLength", routeLength);

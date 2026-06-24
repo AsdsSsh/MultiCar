@@ -35,10 +35,8 @@ public class ControllerMain {
         try {
             messageBus.connect();
 
-            // 3. 声明队列（如果尚未声明）
-            int carCount = blackboard.getCarCount();
-            if (carCount == 0) carCount = 5; // 默认
-            messageBus.declareAllSystemQueues(carCount);
+            // 3. 声明共享队列
+            messageBus.declareSharedQueues();
 
             // 4. 创建并启动Controller
             ControllerAgent controller = new ControllerAgent(blackboard, messageBus);

@@ -63,8 +63,11 @@ onMounted(() => {
 function selectMap(map) {
   selectedMap.value = map
 
-  // 构建 SET_CONFIG 数据
+  // 生成 sessionId（前端统一管理）
+  const sessionId = crypto.randomUUID ? crypto.randomUUID().substring(0, 8) : Date.now().toString(36)
+
   const config = {
+    sessionId,
     mapWidth: map.mapWidth || 40,
     mapHeight: map.mapHeight || 30,
     carCount: map.carPositions?.length || map.carCount || 5,
@@ -74,7 +77,6 @@ function selectMap(map) {
     carPositions: map.carPositions || []
   }
 
-  // ★ 立即更新 store.config，避免在服务端 STATE_UPDATE 到达前渲染使用旧值
   store.config = {
     ...store.config,
     mapWidth: config.mapWidth,
@@ -83,12 +85,11 @@ function selectMap(map) {
     obstacleDensity: config.obstacleDensity,
     algorithm: config.algorithm
   }
+  store.sessionId = sessionId
 
-  // 发送 SET_CONFIG 命令
   sendCommand(COMMANDS.SET_CONFIG, config)
   store.setRunning(false)
   viewMode.value = 'simulation'
-  // 进入仿真视图时刷新地图列表
   loadSavedMaps()
 }
 

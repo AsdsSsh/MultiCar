@@ -13,6 +13,13 @@ const registrations = ref([])
 const loading = ref(false)
 const error = ref('')
 
+// 新增用户弹窗
+const createDialogVisible = ref(false)
+const createUsername = ref('')
+const createPassword = ref('')
+const createRole = ref('USER')
+const createError = ref('')
+
 // 重置密码弹窗
 const resetDialogVisible = ref(false)
 const resetUserId = ref('')
@@ -49,6 +56,33 @@ async function loadData() {
 }
 
 // ===== 用户管理 =====
+
+function openCreateUser() {
+  createUsername.value = ''
+  createPassword.value = ''
+  createRole.value = 'USER'
+  createError.value = ''
+  createDialogVisible.value = true
+}
+
+async function confirmCreateUser() {
+  createError.value = ''
+  if (!createUsername.value.trim()) {
+    createError.value = '用户名不能为空'
+    return
+  }
+  if (!createPassword.value || createPassword.value.length < 6) {
+    createError.value = '密码长度不能少于 6 个字符'
+    return
+  }
+  try {
+    await api.createUser(createUsername.value.trim(), createPassword.value, createRole.value)
+    createDialogVisible.value = false
+    await loadData()
+  } catch (e) {
+    createError.value = e.message || '创建失败'
+  }
+}
 
 function openResetPassword(user) {
   resetUserId.value = user.id
@@ -168,6 +202,10 @@ function formatTime(ts) {
 
     <!-- 用户列表 -->
     <div v-else-if="activeTab === 'users'" class="content">
+      <div class="section-header">
+        <span></span>
+        <button class="btn primary" @click="openCreateUser">+ 新增用户</button>
+      </div>
       <table class="data-table">
         <thead>
           <tr>
@@ -229,6 +267,34 @@ function formatTime(ts) {
         </tbody>
       </table>
       <div v-if="registrations.length === 0" class="empty">暂无注册请求</div>
+    </div>
+
+    <!-- 新增用户弹窗 -->
+    <div v-if="createDialogVisible" class="overlay" @click.self="createDialogVisible = false">
+      <div class="dialog">
+        <h3>新增用户</h3>
+        <label>
+          <span>用户名</span>
+          <input v-model="createUsername" type="text" placeholder="3-32个字符" />
+        </label>
+        <label>
+          <span>密码</span>
+          <input v-model="createPassword" type="password" placeholder="至少6个字符" />
+        </label>
+        <label>
+          <span>角色</span>
+          <select v-model="createRole">
+            <option value="USER">用户</option>
+            <option value="CONFIGURATOR">配置员</option>
+            <option value="ADMIN">管理员</option>
+          </select>
+        </label>
+        <div v-if="createError" class="error-msg-inline">{{ createError }}</div>
+        <div class="dialog-actions">
+          <button class="btn" @click="createDialogVisible = false">取消</button>
+          <button class="btn primary" @click="confirmCreateUser">确认创建</button>
+        </div>
+      </div>
     </div>
 
     <!-- 重置密码弹窗 -->
@@ -354,6 +420,10 @@ function formatTime(ts) {
   flex: 1;
   overflow-y: auto;
   padding: 20px;
+}
+.section-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 12px;
 }
 .loading, .empty {
   text-align: center;

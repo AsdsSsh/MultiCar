@@ -116,15 +116,6 @@ public class DistributedLock {
         }
     }
 
-    /**
-     * 以 Car 为粒度执行加锁操作
-     * 使用 Constants.getLockKey(carId) 生成锁 key
-     */
-    public boolean executeWithCarLock(String carId, Runnable operation) {
-        String lockKey = Constants.getLockKey(carId);
-        return executeWithLock(lockKey, operation);
-    }
-
     public void close() {
         if (jedisPool != null && !jedisPool.isClosed()) {
             jedisPool.close();

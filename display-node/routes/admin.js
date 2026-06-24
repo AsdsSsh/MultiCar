@@ -6,6 +6,30 @@ const { requireAdmin } = require('../auth/middleware');
 
 router.use(requireAdmin);
 
+// POST /api/admin/users — 管理员直接创建用户
+router.post('/users', (req, res) => {
+  const { username, password, role } = req.body || {};
+  if (!username || !username.trim()) {
+    return res.status(400).json({ success: false, message: '用户名不能为空' });
+  }
+  if (username.length < 3 || username.length > 32) {
+    return res.status(400).json({ success: false, message: '用户名长度需在 3-32 个字符之间' });
+  }
+  if (!password || password.length < 6) {
+    return res.status(400).json({ success: false, message: '密码长度不能少于 6 个字符' });
+  }
+  if (!role || !['ADMIN', 'CONFIGURATOR', 'USER'].includes(role)) {
+    return res.status(400).json({ success: false, message: '无效角色' });
+  }
+  try {
+    const user = store.createUser(username.trim(), password, role, true);
+    console.log(`管理员 ${req.user.username} 创建了用户: ${username} (${role})`);
+    res.json({ success: true, message: '用户已创建', user: { id: user.id, username: user.username, role: user.role } });
+  } catch (e) {
+    res.status(409).json({ success: false, message: e.message });
+  }
+});
+
 // GET /api/admin/users
 router.get('/users', (req, res) => {
   const users = store.listAllUsers().map(u => ({

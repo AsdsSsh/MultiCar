@@ -59,6 +59,13 @@ export const api = {
     return request('/api/admin/users')
   },
 
+  createUser(username, password, role) {
+    return request('/api/admin/users', {
+      method: 'POST',
+      body: JSON.stringify({ username, password, role })
+    })
+  },
+
   resetPassword(userId, newPassword) {
     return request(`/api/admin/users/${userId}/reset-password`, {
       method: 'POST',

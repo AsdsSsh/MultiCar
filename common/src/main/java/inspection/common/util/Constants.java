@@ -21,7 +21,7 @@ public final class Constants {
     public static final String DEFAULT_ALGORITHM = "BFS";
 
     // ===== 视野范围 =====
-    public static final int VISION_RANGE = 1;  // 3x3 = 2*VISION_RANGE+1
+    public static final int VISION_RANGE = 1;
 
     // ===== 探索完成阈值 =====
     public static final double EXPLORATION_COMPLETE_THRESHOLD = 99.9;
@@ -35,12 +35,26 @@ public final class Constants {
     // ===== 目标分配距离规则 =====
     public static final int MIN_TARGET_DISTANCE = 10;
 
-    // ===== MQ 队列名 =====
+    // ===== Session 命名空间 =====
+    public static String getSessionPrefix(String sessionId) {
+        return "session:" + sessionId + ":";
+    }
+
+    // ===== MQ 队列名（共享，不随 session 变化） =====
     public static final String QUEUE_CONTROLLER_CMD = "ControllerCmd";
     public static final String QUEUE_NAVIGATOR_CMD = "NavigatorCmd";
     public static final String QUEUE_TARGET_PLANNER_CMD = "TargetPlannerCmd";
     public static final String QUEUE_TASK_CONFIG_CMD = "TaskConfigCmd";
-    public static final String EXCHANGE_UPDATE_VIEW = "UpdateView";
+
+    /** 每 session 一个 Fanout 交换器 */
+    public static String getSessionFanoutExchange(String sessionId) {
+        return "UpdateView_" + sessionId;
+    }
+
+    /** 每 session 一个刷新队列 */
+    public static String getSessionRefreshQueue(String sessionId) {
+        return "WSB_Refresh_" + sessionId;
+    }
 
     // ===== MQ 命令名 =====
     public static final String CMD_SET_CONFIG = "SET_CONFIG";
@@ -67,43 +81,56 @@ public final class Constants {
     public static final String CMD_DELETE_CAR = "DELETE_CAR";
     public static final String CMD_MOVE_CAR = "MOVE_CAR";
 
+    /** 小车队列（所有 session 共用，通过消息中的 sessionId 区分） */
     public static String getCarQueueName(String carId) {
         return "Car_" + carId;
     }
 
-    // ===== Redis Key 前缀 =====
-    public static final String REDIS_KEY_MAP_VIEW = "mapView";
-    public static final String REDIS_KEY_MAP_BLOCK = "mapBlock";
-    public static final String REDIS_KEY_TASK_CONFIG = "TaskConfig";
-    public static final String REDIS_KEY_SIMULATION_PAUSED = "simulation:paused";
+    // ===== Redis Key（带 session 前缀） =====
     public static final String REDIS_KEY_LOCK_PREFIX = "lock:";
 
-    public static String getCarPositionKey(String carId) {
-        return carId + ":Position";
+    public static String getMapViewKey(String sessionId) {
+        return getSessionPrefix(sessionId) + "mapView";
     }
 
-    public static String getCarTargetKey(String carId) {
-        return carId + ":Target";
+    public static String getMapBlockKey(String sessionId) {
+        return getSessionPrefix(sessionId) + "mapBlock";
     }
 
-    public static String getCarRouteListKey(String carId) {
-        return carId + ":RouteList";
+    public static String getTaskConfigKey(String sessionId) {
+        return getSessionPrefix(sessionId) + "TaskConfig";
     }
 
-    public static String getCarStatusKey(String carId) {
-        return carId + ":Status";
+    public static String getSimulationPausedKey(String sessionId) {
+        return getSessionPrefix(sessionId) + "simulation:paused";
     }
 
-    public static String getCarStepsKey(String carId) {
-        return carId + ":Steps";
+    public static String getCarPositionKey(String sessionId, String carId) {
+        return getSessionPrefix(sessionId) + carId + ":Position";
     }
 
-    public static String getCarBlockedTickKey(String carId) {
-        return carId + ":BlockedTick";
+    public static String getCarTargetKey(String sessionId, String carId) {
+        return getSessionPrefix(sessionId) + carId + ":Target";
     }
 
-    public static String getLockKey(String carId) {
-        return REDIS_KEY_LOCK_PREFIX + carId;
+    public static String getCarRouteListKey(String sessionId, String carId) {
+        return getSessionPrefix(sessionId) + carId + ":RouteList";
+    }
+
+    public static String getCarStatusKey(String sessionId, String carId) {
+        return getSessionPrefix(sessionId) + carId + ":Status";
+    }
+
+    public static String getCarStepsKey(String sessionId, String carId) {
+        return getSessionPrefix(sessionId) + carId + ":Steps";
+    }
+
+    public static String getCarBlockedTickKey(String sessionId, String carId) {
+        return getSessionPrefix(sessionId) + carId + ":BlockedTick";
+    }
+
+    public static String getLockKey(String sessionId, String carId) {
+        return REDIS_KEY_LOCK_PREFIX + sessionId + ":" + carId;
     }
 
     // ===== 生成小车ID列表 =====
@@ -118,16 +145,16 @@ public final class Constants {
     // ===== 小车初始位置（4角+中心） =====
     public static Point getCarInitialPosition(int index, int mapWidth, int mapHeight) {
         return switch (index) {
-            case 0 -> new Point(1, 1);                          // 001: 左上角
-            case 1 -> new Point(mapWidth - 2, 1);               // 002: 右上角
-            case 2 -> new Point(1, mapHeight - 2);              // 003: 左下角
-            case 3 -> new Point(mapWidth - 2, mapHeight - 2);   // 004: 右下角
-            case 4 -> new Point(mapWidth / 2, mapHeight / 2);   // 005: 中心
+            case 0 -> new Point(1, 1);
+            case 1 -> new Point(mapWidth - 2, 1);
+            case 2 -> new Point(1, mapHeight - 2);
+            case 3 -> new Point(mapWidth - 2, mapHeight - 2);
+            case 4 -> new Point(mapWidth / 2, mapHeight / 2);
             default -> new Point(mapWidth / 2, mapHeight / 2);
         };
     }
 
-    // ===== 小车颜色（前端显示） =====
+    // ===== 小车颜色 =====
     public static String getCarColor(String carId) {
         return switch (carId) {
             case "Car001" -> "#00E676";

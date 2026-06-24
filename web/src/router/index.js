@@ -6,6 +6,7 @@ import RegisterPage from '../views/RegisterPage.vue'
 import AdminPage from '../views/AdminPage.vue'
 import ConfiguratorPage from '../views/ConfiguratorPage.vue'
 import UserPage from '../views/UserPage.vue'
+import ReplayPage from '../views/ReplayPage.vue'
 
 const routes = [
   { path: '/', redirect: '/login' },
@@ -27,6 +28,12 @@ const routes = [
     path: '/user',
     name: 'User',
     component: UserPage,
+    meta: { requiresAuth: true, roles: ['USER', 'ADMIN'] }
+  },
+  {
+    path: '/replay',
+    name: 'Replay',
+    component: ReplayPage,
     meta: { requiresAuth: true, roles: ['USER', 'ADMIN'] }
   }
 ]

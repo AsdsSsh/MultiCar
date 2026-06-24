@@ -1,73 +1,93 @@
-// 推送服务 — 与 Java PushService 完全一致
 const { shouldCompress, compressRLE } = require('../utils/mapCompression');
+const recorder = require('./recorder');
 
 class PushService {
   constructor(blackboardReader) {
     this.reader = blackboardReader;
-    this.sessions = new Set();
+    this.sessions = new Map();
+    this.recordedSessions = new Set();
   }
 
   addSession(ws) {
-    this.sessions.add(ws);
+    this.sessions.set(ws, new Set());
   }
 
   removeSession(ws) {
     this.sessions.delete(ws);
   }
 
-  broadcastMapUpdated() {
-    if (this.sessions.size === 0) return;
-    const msg = JSON.stringify({ type: 'MAP_LIST_UPDATED' });
-    for (const ws of this.sessions) {
-      if (ws.readyState === 1) {
-        try { ws.send(msg); } catch (e) { /* ignore */ }
-      }
-    }
-    console.log(`[PUSH] 广播 MAP_LIST_UPDATED 到 ${this.sessions.size} 个客户端`);
+  /** WebSocket 关联到某个 session */
+  subscribeToSession(ws, sessionId) {
+    const set = this.sessions.get(ws);
+    if (set) set.add(sessionId);
+    console.log(`[WS] session bind: ${sessionId}`);
   }
 
-  async pushStateUpdate(tick) {
-    if (this.sessions.size === 0) return;
+  /** WebSocket 取消关联 */
+  unsubscribeFromSession(ws, sessionId) {
+    const set = this.sessions.get(ws);
+    if (set) set.delete(sessionId);
+  }
 
+  broadcastMapUpdated() {
+    const msg = JSON.stringify({ type: 'MAP_LIST_UPDATED' });
+    for (const ws of this.sessions.keys()) {
+      if (ws.readyState === 1) {
+        try { ws.send(msg); } catch (e) { }
+      }
+    }
+  }
+
+  async pushStateUpdate(tick, sessionId) {
     try {
-      const config = await this.reader.readTaskConfig();
+      const config = await this.reader.readTaskConfig(sessionId);
       const w = config.mapWidth || 40;
       const h = config.mapHeight || 30;
 
       const state = {
         type: 'STATE_UPDATE',
+        sessionId,
         tick,
-        running: !(await this.reader.isPaused()),
+        running: !(await this.reader.isPaused(sessionId)),
         config,
-        cars: await this.reader.readAllCars(),
+        cars: await this.reader.readAllCars(sessionId),
         mapWidth: w,
         mapHeight: h,
       };
 
-      // 地图压缩
       const useCompression = shouldCompress(w, h);
       if (useCompression) {
-        const mapViewRaw = await this.reader.readMapView(w, h);
-        const mapBlockRaw = await this.reader.readMapBlock(w, h);
-        state.mapViewCompressed = compressRLE(mapViewRaw);
-        state.mapBlockCompressed = compressRLE(mapBlockRaw);
+        state.mapViewCompressed = compressRLE(await this.reader.readMapView(sessionId, w, h));
+        state.mapBlockCompressed = compressRLE(await this.reader.readMapBlock(sessionId, w, h));
         state.mapView = null;
         state.mapBlock = null;
         state.compressed = true;
       } else {
-        state.mapView = await this.reader.readMapView(w, h);
-        state.mapBlock = await this.reader.readMapBlock(w, h);
+        state.mapView = await this.reader.readMapView(sessionId, w, h);
+        state.mapBlock = await this.reader.readMapBlock(sessionId, w, h);
         state.compressed = false;
       }
 
       const json = JSON.stringify(state);
-      for (const ws of this.sessions) {
-        if (ws.readyState === 1) {
-          try { ws.send(json); } catch (e) { /* ignore */ }
+
+      for (const [ws, sessionSet] of this.sessions.entries()) {
+        if (ws.readyState === 1 && sessionSet.has(sessionId)) {
+          try { ws.send(json); } catch (e) { }
         }
       }
+
+      // 自动录制：tick==1 开始，running==false 停止
+      if (!this.recordedSessions.has(sessionId)) {
+        recorder.startRecording(sessionId);
+        this.recordedSessions.add(sessionId);
+      }
+      recorder.recordTick(sessionId, json);
+      if (!state.running) {
+        recorder.stopRecording(sessionId);
+        this.recordedSessions.delete(sessionId);
+      }
     } catch (e) {
-      console.error('[PUSH] 组装 STATE_UPDATE 失败:', e.message);
+      console.error(`[PUSH] 组装 STATE_UPDATE 失败 (session ${sessionId}):`, e.message);
     }
   }
 }

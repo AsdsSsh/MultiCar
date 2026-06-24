@@ -9,6 +9,7 @@ import { decompressRLE } from '../utils/mapCompression.js'
 // ============================================================
 export const useSimulationStore = defineStore('simulation', {
   state: () => ({
+    sessionId: null,  // 当前仿真会话 ID
     connected: false, // WebSocket 连接状态
     tick: 0, // 当前节拍号
     isRunning: false, // 仿真是否运行中（由用户操作控制，不自动推断）
@@ -69,6 +70,7 @@ export const useSimulationStore = defineStore('simulation', {
     /** 处理 WSB 推送的 STATE_UPDATE 快照 */
     handleStateUpdate(payload) {
       if (!payload) return
+      if (payload.sessionId) this.sessionId = payload.sessionId
       if (typeof payload.tick === 'number') this.tick = payload.tick
       if (typeof payload.running === 'boolean') this.isRunning = payload.running
       if (payload.config) {

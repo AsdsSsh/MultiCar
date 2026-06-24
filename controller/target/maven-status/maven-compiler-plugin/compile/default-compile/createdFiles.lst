@@ -1,3 +1,4 @@
-inspection\controller\ControllerAgent.class
 inspection\controller\ControllerMain.class
+inspection\controller\ControllerAgent.class
+inspection\controller\ControllerAgent$SessionState.class
 inspection\controller\ControllerAgent$1.class

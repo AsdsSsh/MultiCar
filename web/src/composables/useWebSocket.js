@@ -93,13 +93,22 @@ export function useWebSocket(store, url = WS_URL, callbacks = {}) {
     }
   }
 
-  /** 发送命令到 WSB（统一 JSON：{cmd,data,timestamp}） */
+  /** 发送命令到 WSB（统一 JSON：{cmd,data,timestamp}，自动携带 sessionId） */
   function sendCommand(cmd, data = {}) {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      console.warn('[WS] 未连接，命令已丢弃：', cmd)
+      console.warn('[WS] 未连接，命令已弃：', cmd)
       return false
     }
-    ws.send(JSON.stringify({ cmd, data, timestamp: Date.now() }))
+    const payload = {
+      cmd,
+      data: { ...data },
+      timestamp: Date.now(),
+    }
+    // 自动附加当前 sessionId
+    if (store.sessionId && !payload.data.sessionId) {
+      payload.data.sessionId = store.sessionId
+    }
+    ws.send(JSON.stringify(payload))
     return true
   }
 
