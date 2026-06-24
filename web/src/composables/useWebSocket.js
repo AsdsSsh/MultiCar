@@ -50,6 +50,11 @@ export function useWebSocket(store, url = WS_URL, callbacks = {}) {
           callbacks.onMapListUpdated()
         }
       }
+      if (msg && msg.type === WS_TYPES.SIMULATION_LIST_UPDATED) {
+        if (callbacks.onSimulationListUpdated) {
+          callbacks.onSimulationListUpdated()
+        }
+      }
     }
 
     ws.onclose = () => {

@@ -37,7 +37,8 @@ export const COMMANDS = {
 /** WebSocket 服务端推送消息类型 */
 export const WS_TYPES = {
   STATE_UPDATE: 'STATE_UPDATE',
-  MAP_LIST_UPDATED: 'MAP_LIST_UPDATED'
+  MAP_LIST_UPDATED: 'MAP_LIST_UPDATED',
+  SIMULATION_LIST_UPDATED: 'SIMULATION_LIST_UPDATED'
 }
 
 /** 路径规划算法选项 */

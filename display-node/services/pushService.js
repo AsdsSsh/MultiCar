@@ -39,6 +39,15 @@ class PushService {
     }
   }
 
+  broadcastSimulationUpdated() {
+    const msg = JSON.stringify({ type: 'SIMULATION_LIST_UPDATED' });
+    for (const ws of this.sessions.keys()) {
+      if (ws.readyState === 1) {
+        try { ws.send(msg); } catch (e) { }
+      }
+    }
+  }
+
   async pushStateUpdate(tick, sessionId) {
     try {
       const config = await this.reader.readTaskConfig(sessionId);

@@ -50,7 +50,8 @@ function onMapListUpdated() {
 
 const wsUrl = WS_URL + '?token=' + authStore.token
 const { connected, sendCommand } = useWebSocket(store, wsUrl, {
-  onMapListUpdated
+  onMapListUpdated,
+  onSimulationListUpdated: loadSimulations
 })
 
 // ===== 加载地图列表 =====

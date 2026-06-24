@@ -29,6 +29,8 @@ router.post('/create', (req, res) => {
     return res.status(404).json({ success: false, message: '地图不存在' });
   }
   const simulation = store.createSimulation(name.trim(), mapId, req.user.username);
+  const ps = req.app.get('pushService');
+  if (ps) ps.broadcastSimulationUpdated();
   res.json({ success: true, simulation });
 });
 
@@ -61,6 +63,8 @@ router.delete('/:id', (req, res) => {
     return res.status(403).json({ success: false, message: '无权删除此仿真' });
   }
   store.deleteSimulation(req.params.id);
+  const ps = req.app.get('pushService');
+  if (ps) ps.broadcastSimulationUpdated();
   res.json({ success: true, message: '仿真已删除' });
 });
 

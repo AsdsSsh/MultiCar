@@ -15,6 +15,7 @@ const adminRoutes = require('./routes/admin');
 const mapConfigRoutes = require('./routes/mapConfig');
 const replayRoutes = require('./routes/replay');
 const simulationRoutes = require('./routes/simulation');
+const jsonFileStore = require('./store/jsonFileStore');
 
 async function main() {
   const app = express();
@@ -43,6 +44,8 @@ async function main() {
   app.use('/api/config', mapConfigRoutes);
   app.use('/api/replay', replayRoutes);
 app.use('/api/simulation', simulationRoutes);
+
+  await jsonFileStore.initRedis();
 
   server.listen(config.server.port, () => {
     console.log('═════════════════════════════════════');

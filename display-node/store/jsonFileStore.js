@@ -2,7 +2,9 @@
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const Redis = require('ioredis');
 const passwordUtil = require('../auth/password');
+const cfg = require('../config');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
@@ -10,12 +12,22 @@ const REGISTRATIONS_FILE = path.join(DATA_DIR, 'registrations.json');
 const MAPS_FILE = path.join(DATA_DIR, 'maps.json');
 const SIMULATIONS_FILE = path.join(DATA_DIR, 'simulations.json');
 
+const SIMULATIONS_REDIS_KEY = 'simulations';
+
 class JsonFileStore {
   constructor() {
     this.users = new Map();
     this.registrations = new Map();
     this.savedMaps = new Map();
     this.simulations = new Map();
+
+    this.redis = new Redis({
+      host: cfg.redis.host,
+      port: cfg.redis.port,
+      password: cfg.redis.password,
+      lazyConnect: true,
+      retryStrategy: () => null, // 不重试，Redis 不可用时回退到 JSON 文件
+    });
 
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -245,9 +257,11 @@ class JsonFileStore {
       status: 'inactive',
       createdAt: Date.now(),
       createdBy,
+      updatedAt: Date.now(),
     };
     this.simulations.set(id, sim);
     this._persistSimulations();
+    this._syncSimulationToRedis(id);
     console.log(`创建仿真: ${name} (${id}), 创建者: ${createdBy}`);
     return { ...sim };
   }
@@ -256,7 +270,9 @@ class JsonFileStore {
     const sim = this.simulations.get(id);
     if (!sim) return false;
     sim.status = status;
+    sim.updatedAt = Date.now();
     this._persistSimulations();
+    this._syncSimulationToRedis(id);
     return true;
   }
 
@@ -265,6 +281,7 @@ class JsonFileStore {
     if (!removed) return false;
     this.simulations.delete(id);
     this._persistSimulations();
+    this._syncSimulationToRedis(id);
     console.log(`删除仿真: ${removed.name} (${id})`);
     return true;
   }
@@ -368,13 +385,54 @@ class JsonFileStore {
     }
   }
 
-  _persistSimulations() {
+  async initRedis() {
+    try {
+      await this.redis.connect();
+      const all = await this.redis.hgetall(SIMULATIONS_REDIS_KEY);
+      if (all) {
+        for (const [id, json] of Object.entries(all)) {
+          try {
+            const sim = JSON.parse(json);
+            const existing = this.simulations.get(id);
+            if (!existing || sim.updatedAt >= (existing.updatedAt || 0)) {
+              this.simulations.set(id, sim);
+            }
+          } catch (e) { /* skip invalid */ }
+        }
+      }
+      // 把本地比 Redis 多的同步上去
+      for (const [id, sim] of this.simulations) {
+        if (!all || !all[id]) {
+          await this.redis.hset(SIMULATIONS_REDIS_KEY, id, JSON.stringify(sim));
+        }
+      }
+      console.log(`从 Redis 加载仿真：${this.simulations.size} 个`);
+    } catch (e) {
+      console.error('Redis 连接失败，仿真使用本地文件:', e.message);
+    }
+  }
+
+  async _persistSimulations() {
+    // 本地 JSON 备份
     try {
       const list = Array.from(this.simulations.values());
       fs.writeFileSync(SIMULATIONS_FILE, JSON.stringify(list, null, 2), 'utf8');
     } catch (e) {
       console.error('保存仿真文件失败', e.message);
     }
+  }
+
+  async _syncSimulationToRedis(id) {
+    try {
+      if (this.redis.status === 'ready') {
+        const sim = this.simulations.get(id);
+        if (sim) {
+          await this.redis.hset(SIMULATIONS_REDIS_KEY, id, JSON.stringify(sim));
+        } else {
+          await this.redis.hdel(SIMULATIONS_REDIS_KEY, id);
+        }
+      }
+    } catch (e) { /* Redis 不可用时静默失败 */ }
   }
 }
 
