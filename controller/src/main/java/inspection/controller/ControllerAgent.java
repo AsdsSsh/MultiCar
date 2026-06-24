@@ -91,6 +91,7 @@ public class ControllerAgent {
                 case CMD_SET_MAP_EDIT -> forwardWebCommand(cmd, data);
                 case CMD_RESET -> forwardWebCommand(cmd, data);
                 case CMD_PAUSE -> handlePause(sessionId);
+                case CMD_STOP -> handleStop(sessionId);
                 case CMD_RESUME -> handleResume(sessionId);
                 case CMD_STEP_ONCE -> handleStepOnce(sessionId);
                 default -> log.warn("Unknown command: {}", cmd);
@@ -269,6 +270,16 @@ public class ControllerAgent {
         }
     }
 
+    private void handleStop(String sessionId) {
+        SessionState s = sessions.remove(sessionId);
+        if (s != null) {
+            s.running = false;
+            s.paused = true;
+            blackboard.clearSession(sessionId);
+            log.info("Session {} STOPPED and cleaned", sessionId);
+        }
+    }
+
     private void handlePause(String sessionId) {
         SessionState s = sessions.get(sessionId);
         if (s != null && !s.paused) {
@@ -283,7 +294,8 @@ public class ControllerAgent {
         if (s != null && s.paused) {
             s.paused = false;
             blackboard.setPaused(sessionId, false);
-            log.info("Session {} RESUMED", sessionId);
+            log.info("Session {} RESUMED (immediate tick)", sessionId);
+            scheduler.schedule(() -> tickSession(s), 0, TimeUnit.MILLISECONDS);
         }
     }
 

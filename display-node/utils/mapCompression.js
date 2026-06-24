@@ -6,7 +6,7 @@ function shouldCompress(width, height) {
   return width * height > 1200;
 }
 
-/** RLE 行程编码压缩二维数组 */
+/** RLE 行程编码压缩（位打包格式：code = (count << 1) | value，与前端解压一致） */
 function compressRLE(map) {
   if (!map || map.length === 0) return [];
   const result = [];
@@ -18,7 +18,7 @@ function compressRLE(map) {
         if (x < map[y].length && map[y][x] === map[y][x - 1]) {
           count++;
         } else {
-          row.push(map[y][x - 1], count);
+          row.push((count << 1) | (map[y][x - 1] & 1));
           count = 1;
         }
       }

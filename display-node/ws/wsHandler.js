@@ -1,4 +1,5 @@
 const jwt = require('../auth/jwt');
+const recorder = require('../services/recorder');
 
 class WsHandler {
   constructor(pushService, rabbitClient) {
@@ -56,10 +57,26 @@ class WsHandler {
         return;
       }
 
-      // SET_CONFIG: 提取或生成 sessionId
+      // STOP: 清理 session 资源
+      if (cmd === 'STOP') {
+        const sessionId = msg.data && msg.data.sessionId;
+        if (sessionId) {
+          this.pushService.unsubscribeFromSession(ws, sessionId);
+          recorder.removeSession(sessionId);
+          console.log(`[WS] session cleaned: ${sessionId}`);
+        }
+        // 继续转发 STOP 给 Controller 清理 Redis
+      }
+
+      // SET_CONFIG: 先切到新 session，取消旧订阅
       if (cmd === 'SET_CONFIG') {
         const sessionId = msg.data && msg.data.sessionId;
         if (sessionId) {
+          // 清除该 WS 的所有旧 session 绑定
+          if (ws._sessions) {
+            ws._sessions.forEach(sid => this.pushService.unsubscribeFromSession(ws, sid));
+          }
+          ws._sessions = new Set([sessionId]);
           this.pushService.subscribeToSession(ws, sessionId);
           this.rabbitClient.subscribeSession(sessionId);
         }

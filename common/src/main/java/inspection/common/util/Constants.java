@@ -76,6 +76,7 @@ public final class Constants {
     public static final String CMD_ROUTE_DONE = "ROUTE_DONE";
     public static final String CMD_REFRESH_ALL = "REFRESH_ALL";
     public static final String CMD_PAUSE = "PAUSE";
+    public static final String CMD_STOP = "STOP";
     public static final String CMD_RESUME = "RESUME";
     public static final String CMD_STEP_ONCE = "STEP_ONCE";
     public static final String CMD_ADD_CAR = "ADD_CAR";

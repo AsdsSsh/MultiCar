@@ -63,7 +63,8 @@ onMounted(() => {
 function selectMap(map) {
   selectedMap.value = map
 
-  // 生成 sessionId（前端统一管理）
+  // 先停旧 session，再生成新 sessionId
+  if (store.sessionId) sendCommand('STOP')
   const sessionId = crypto.randomUUID ? crypto.randomUUID().substring(0, 8) : Date.now().toString(36)
 
   const config = {
@@ -76,6 +77,12 @@ function selectMap(map) {
     customObstacles: map.obstacles || [],
     carPositions: map.carPositions || []
   }
+
+  // 清除旧地图数据，避免新地图加载前显示残留
+  store.cars = []
+  store.mapView = []
+  store.mapBlock = []
+  store.tick = 0
 
   store.config = {
     ...store.config,
@@ -96,7 +103,7 @@ function selectMap(map) {
 // ===== 返回地图列表 =====
 function backToList() {
   // 先停止仿真
-  sendCommand(COMMANDS.PAUSE)
+  sendCommand('STOP')
   store.setRunning(false)
   viewMode.value = 'list'
   selectedMap.value = null

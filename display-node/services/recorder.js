@@ -40,6 +40,13 @@ class Recorder {
     console.log(`[REC] 结束录制 session ${sessionId}，共 ${s.tickCount} tick`);
   }
 
+  removeSession(sessionId) {
+    const file = path.join(REPLAY_DIR, `${sessionId}.jsonl`);
+    try {
+      if (fs.existsSync(file)) fs.unlinkSync(file);
+    } catch (e) { /* ignore */ }
+  }
+
   /** 列出所有录制 */
   listSessions() {
     if (!fs.existsSync(REPLAY_DIR)) return [];
