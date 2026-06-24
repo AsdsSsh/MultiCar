@@ -1,11 +1,13 @@
 <script setup>
 import { useSimulationStore } from '../store/simulationStore.js'
-import { getCarColor } from '../utils/canvasDrawer.js'
+import { getCarColor, extractCarNumber } from '../utils/canvasDrawer.js'
 import CarStatusItem from './CarStatusItem.vue'
 
 defineProps({
   cars: { type: Array, default: () => [] }
 })
+
+const emit = defineEmits(['delete-car', 'move-car'])
 
 const store = useSimulationStore()
 
@@ -16,6 +18,11 @@ function onHover(carId) {
 function onLeave() {
   store.setActiveCar(null)
 }
+
+function carColor(car) {
+  const num = extractCarNumber(car.carId)
+  return getCarColor(num - 1)
+}
 </script>
 
 <template>
@@ -23,14 +30,16 @@ function onLeave() {
     <h2>小车状态 <small>({{ cars.length }})</small></h2>
     <p v-if="!cars.length" class="empty">暂无小车数据</p>
     <CarStatusItem
-      v-for="(car, i) in cars"
+      v-for="car in cars"
       :key="car.carId"
       :car="car"
-      :color="getCarColor(i)"
-      :index="i + 1"
+      :color="carColor(car)"
+      :index="extractCarNumber(car.carId)"
       :active="store.activeCarId === car.carId"
       @hover="onHover"
       @leave="onLeave"
+      @delete-car="emit('delete-car', $event)"
+      @move-car="emit('move-car', $event)"
     />
   </section>
 </template>

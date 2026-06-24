@@ -42,6 +42,12 @@ public class MessageBus {
         factory.setPassword(config.getPassword());
         factory.setVirtualHost(config.getVirtualHost());
 
+        // 跨机器部署优化：连接超时、心跳保活、自动恢复
+        factory.setConnectionTimeout(5000);
+        factory.setRequestedHeartbeat(30);
+        factory.setNetworkRecoveryInterval(5000);
+        factory.setAutomaticRecoveryEnabled(true);
+
         this.connection = factory.newConnection();
         this.channel = connection.createChannel();
         logger.info("已连接到 RabbitMQ: {}:{}", config.getHost(), config.getPort());
@@ -81,6 +87,9 @@ public class MessageBus {
         declareQueue(Constants.QUEUE_TARGET_PLANNER_CMD);
         declareQueue(Constants.QUEUE_TASK_CONFIG_CMD);
 
+        // 声明 Display 的刷新队列（提前创建，确保不会丢消息）
+        declareQueue("WSB_Refresh");
+
         // 声明小车队列
         for (int i = 1; i <= carCount; i++) {
             declareQueue(Constants.getCarQueueName(String.format("Car%03d", i)));
@@ -88,6 +97,9 @@ public class MessageBus {
 
         // 声明广播交换器
         declareFanoutExchange(Constants.EXCHANGE_UPDATE_VIEW);
+
+        // 绑定 WSB_Refresh 到 UpdateView Fanout
+        bindQueueToFanout("WSB_Refresh", Constants.EXCHANGE_UPDATE_VIEW);
 
         logger.info("系统队列声明完成，小车数: {}", carCount);
     }

@@ -1,7 +1,10 @@
 package inspection.targetplanner;
 
 import inspection.common.blackboard.BlackboardClient;
+import inspection.common.blackboard.BlackboardConfig;
+import inspection.common.config.ConnectionConfig;
 import inspection.common.messaging.MessageBus;
+import inspection.common.messaging.MessageConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,12 +25,14 @@ public class TargetPlannerMain {
             log.info("  算法层 | 成员C");
             log.info("═════════════════════════════════════");
 
-            // 1. 连接 Redis 黑板
-            final BlackboardClient blackboard = new BlackboardClient();
+            // 1. 连接 Redis 黑板（统一配置：环境变量 > 系统属性 > config.properties）
+            BlackboardConfig bbConfig = ConnectionConfig.loadBlackboardConfig();
+            final BlackboardClient blackboard = new BlackboardClient(bbConfig);
             log.info("Connected to Redis Blackboard");
 
             // 2. 连接 RabbitMQ 消息总线
-            final MessageBus messageBus = new MessageBus();
+            MessageConfig mqConfig = ConnectionConfig.loadMessageConfig();
+            final MessageBus messageBus = new MessageBus(mqConfig);
             messageBus.connect();
             log.info("Connected to RabbitMQ");
 

@@ -6,8 +6,11 @@ import inspection.common.blackboard.DistributedLock;
 import inspection.common.messaging.MessageBus;
 import inspection.common.model.CarStatus;
 import inspection.common.model.Point;
+import inspection.common.util.MapCompression;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.Set;
 
 import static inspection.common.util.Constants.*;
 
@@ -131,10 +134,12 @@ public class CarAgent {
             return;
         }
 
-        // 3. 检查障碍物
+        // 3. 检查障碍物（视野约束：只有已探索的格子才能知道是不是障碍物）
         int mapWidth = blackboard.getMapWidth();
-        if (blackboard.getMapBlockBit(nextStep.getX(), nextStep.getY(), mapWidth)) {
-            // 有障碍物
+        boolean isExplored = blackboard.getMapViewBit(nextStep.getX(), nextStep.getY(), mapWidth);
+        boolean isObstacle = blackboard.getMapBlockBit(nextStep.getX(), nextStep.getY(), mapWidth);
+        // 已探索 + 是障碍物 → 阻挡；未探索 → 假设可通过（小车不知道前方情况）
+        if (isExplored && isObstacle) {
             handleBlocked(nextStep);
             return;
         }
@@ -178,6 +183,28 @@ public class CarAgent {
 
         // 9. 点亮3×3视野
         blackboard.illuminateArea(popped.getX(), popped.getY(), mapWidth, mapHeight);
+
+        // 9a. 视野约束：点亮后发现当前位置是障碍物 → 进入 BLOCKED（踩到了未知障碍物）
+        if (blackboard.getMapBlockBit(popped.getX(), popped.getY(), mapWidth)) {
+            log.warn("Car {} stepped on unknown obstacle at ({}, {}), blocking", carId, popped.getX(), popped.getY());
+            blackboard.clearCarRouteList(carId);
+            blackboard.clearCarTarget(carId);
+            blackboard.setCarStatus(carId, CarStatus.BLOCKED);
+            blackboard.setCarBlockedTick(carId, currentTick);
+            JSONObject blockData = new JSONObject();
+            blockData.put("carId", carId);
+            blockData.put("x", popped.getX());
+            blockData.put("y", popped.getY());
+            blockData.put("blockedX", popped.getX());
+            blockData.put("blockedY", popped.getY());
+            messageBus.publish(QUEUE_CONTROLLER_CMD, CMD_BLOCKED, blockData);
+            return;
+        }
+
+        // 9b. 增量更新分块地图（如果启用了分块存储）
+        Set<String> affectedChunks = BlackboardClient.getAffectedChunkIds(
+            popped.getX(), popped.getY(), VISION_RANGE, mapWidth, mapHeight);
+        // 块ID记录用于后续增量同步（由 PushService 检查）
 
         // 10. 递增步数
         blackboard.incrementCarSteps(carId);

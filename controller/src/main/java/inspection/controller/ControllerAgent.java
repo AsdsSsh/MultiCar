@@ -5,6 +5,7 @@ import inspection.common.blackboard.BlackboardClient;
 import inspection.common.blackboard.DistributedLock;
 import inspection.common.messaging.MessageBus;
 import inspection.common.model.CarStatus;
+import inspection.common.model.Point;
 import inspection.common.model.RouteAlgorithm;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,6 +49,9 @@ public class ControllerAgent {
 
     /** 待处理的目标分配请求集合 */
     private final Set<String> pendingTargetRequests = new HashSet<>();
+
+    /** 已启动的 Car 进程（用于运行时删除） */
+    private final Map<String, Process> carProcesses = new HashMap<>();
 
     /** 运行状态 */
     private volatile boolean running = false;
@@ -97,10 +101,14 @@ public class ControllerAgent {
                 case CMD_BLOCKED -> handleBlocked(data);
                 case CMD_ROUTE_DONE -> handleRouteDone(data);
                 case CMD_SET_CONFIG -> forwardWebCommand(cmd, data);
+                case CMD_SET_MAP_EDIT -> forwardWebCommand(cmd, data);
                 case CMD_RESET -> forwardWebCommand(cmd, data);
                 case CMD_PAUSE -> handlePause();
                 case CMD_RESUME -> handleResume();
                 case CMD_STEP_ONCE -> handleStepOnce(data);
+                case CMD_ADD_CAR -> handleAddCar(data);
+                case CMD_DELETE_CAR -> handleDeleteCar(data);
+                case CMD_MOVE_CAR -> handleMoveCar(data);
                 default -> log.warn("Unknown command: {}", cmd);
             }
         });
@@ -150,11 +158,12 @@ public class ControllerAgent {
             return;
         }
 
-        // 3. 状态调度：遍历所有小车
+        // 3. 状态调度：遍历所有小车（按实际最大编号扫描，支持动态添加）
         int carCount = blackboard.getCarCount();
+        int maxCarNum = Math.max(carCount, blackboard.getMaxCarNumber());
         List<String> readyCars = new ArrayList<>();
 
-        for (int i = 1; i <= carCount; i++) {
+        for (int i = 1; i <= maxCarNum; i++) {
             String carId = String.format("Car%03d", i);
             CarStatus status = blackboard.getCarStatus(carId);
 
@@ -303,7 +312,12 @@ public class ControllerAgent {
      */
     private void handleTaskReady(JSONObject data) {
         log.info("Task ready: {}", data);
-        // 任务初始化完成，可以开始调度
+        // 任务初始化完成后，默认暂停，等待用户手动开始
+        paused = true;
+        blackboard.setPaused(true);
+        log.info("Simulation PAUSED (initial state), waiting for user to start");
+        // 立即推送初始状态到前端（不等下一个 tick 周期）
+        broadcastViewUpdate(0);
     }
 
     /**
@@ -347,6 +361,7 @@ public class ControllerAgent {
     private void handlePause() {
         if (!paused) {
             paused = true;
+            blackboard.setPaused(true);
             log.info("Simulation PAUSED");
         }
     }
@@ -357,6 +372,7 @@ public class ControllerAgent {
     private void handleResume() {
         if (paused) {
             paused = false;
+            blackboard.setPaused(false);
             log.info("Simulation RESUMED");
         }
     }
@@ -370,6 +386,242 @@ public class ControllerAgent {
         tickInternal();
     }
 
+    /**
+     * 处理 ADD_CAR 命令 — 在探索过程中动态添加小车
+     * 
+     * 1. 扫描 Redis 中现有小车，找到最大编号 + 1 作为新车编号
+     * 2. 在 Redis 黑板中初始化新车数据（不清除已有数据）
+     * 3. 声明新车 MQ 队列
+     * 4. 启动新的 Car JVM 进程（CarMain newCarId）
+     *
+     * @param data 可选的位置信息 { x, y }，为空时自动分配位置
+     */
+    private void handleAddCar(JSONObject data) {
+        // 扫描现有小车，找到最大编号
+        int maxCarNum = blackboard.getMaxCarNumber();
+        int newCarNum = maxCarNum + 1;
+        String newCarId = String.format("Car%03d", newCarNum);
+
+        // 重新计算实际小车数量（扫描 Redis keys）
+        int actualCarCount = blackboard.getActualCarCount();
+
+        log.info("Adding new car: {} (existing cars: {}, max num: {})", newCarId, actualCarCount, maxCarNum);
+
+        // 初始化新车：位置、状态、视野
+        int mapWidth = blackboard.getMapWidth();
+        int mapHeight = blackboard.getMapHeight();
+
+        // 支持用户指定位置，未指定则自动分配
+        Point initPos;
+        if (data != null && data.containsKey("x") && data.containsKey("y")) {
+            int x = Math.max(0, Math.min(data.getIntValue("x"), mapWidth - 1));
+            int y = Math.max(0, Math.min(data.getIntValue("y"), mapHeight - 1));
+            initPos = new Point(x, y);
+            log.info("New car {} using user-specified position ({}, {})", newCarId, x, y);
+        } else {
+            // 使用实际小车数作为 0-based index（用于初始位置分配）
+            initPos = getCarInitialPosition(actualCarCount, mapWidth, mapHeight);
+            log.info("New car {} using auto-assigned position ({}, {})", newCarId, initPos.getX(), initPos.getY());
+        }
+
+        blackboard.setCarPosition(newCarId, initPos);
+        blackboard.setCarStatus(newCarId, CarStatus.IDLE);
+        blackboard.setCarSteps(newCarId, 0);
+        // 增量点亮新车初始视野（不覆盖已有探索数据）
+        blackboard.illuminateArea(initPos.getX(), initPos.getY(), mapWidth, mapHeight);
+
+        // 声明新车的 MQ 队列
+        try {
+            messageBus.declareQueue(getCarQueueName(newCarId));
+        } catch (IOException e) {
+            log.error("Failed to declare queue for {}: {}", newCarId, e.getMessage());
+        }
+
+        // 更新 carCount 为实际小车数 + 1
+        int newCarCount = actualCarCount + 1;
+        blackboard.setTaskConfigField("carCount", String.valueOf(newCarCount));
+
+        // 启动新的 Car JVM 进程
+        try {
+            spawnCarProcess(newCarId);
+        } catch (IOException e) {
+            log.error("Failed to spawn car process for {}: {}", newCarId, e.getMessage());
+        }
+
+        log.info("New car {} initialized at ({}, {}), status=IDLE, carCount={}",
+                newCarId, initPos.getX(), initPos.getY(), newCarCount);
+    }
+
+    /**
+     * 处理 DELETE_CAR：删除小车（运行时操作，不影响地图原始配置）
+     *
+     * 流程：
+     *   0. 获取删除前小车位置（用于日志）
+     *   1. 清理 Redis 中小车的所有数据
+     *   2. 杀死对应的 Car JVM 进程
+     *   3. 更新 carCount
+     *   4. 仿真未启动时：完全重算视野（先清空再按剩余小车位置照亮）
+     */
+    private void handleDeleteCar(JSONObject data) {
+        if (data == null) return;
+        String carId = data.getString("carId");
+        if (carId == null || carId.isEmpty()) {
+            log.warn("DELETE_CAR: carId is empty");
+            return;
+        }
+        log.info("Deleting car: {}", carId);
+
+        // 0. 获取删除前小车位置（必须在 deleteCarData 之前）
+        Point oldPos = blackboard.getCarPosition(carId);
+
+        // 1. 清理 Redis 数据
+        blackboard.deleteCarData(carId);
+
+        // 2. 杀死 Car 进程
+        Process process = carProcesses.remove(carId);
+        if (process != null) {
+            if (process.isAlive()) {
+                process.destroyForcibly();
+                log.info("Terminated Car process for {}", carId);
+            }
+        } else {
+            log.warn("No process found for {}, car may not be running", carId);
+        }
+
+        // 3. 更新 carCount
+        int actualCarCount = blackboard.getActualCarCount();
+        blackboard.setTaskConfigField("carCount", String.valueOf(actualCarCount));
+        log.info("Car {} deleted, actualCarCount updated to {}", carId, actualCarCount);
+
+        // 4. 仿真未启动时：完全重算视野，确保只有当前存在的小车位置被照亮
+        long currentTick = tickCount.get();
+        if (currentTick == 0) {
+            int mapWidth = blackboard.getMapWidth();
+            int mapHeight = blackboard.getMapHeight();
+            blackboard.recalculateFullVision(mapWidth, mapHeight);
+            log.info("Simulation not started yet, recalculated full vision after deleting {}",
+                    carId);
+        }
+
+        // 5. 广播视图更新
+        broadcastViewUpdate(currentTick);
+    }
+
+    /**
+     * 处理 MOVE_CAR：移动小车到新位置（运行时操作，不影响地图原始配置）
+     *
+     * 流程：
+     *   1. 读取旧位置
+     *   2. 清除小车当前的目标和路径
+     *   3. 设置新位置
+     *   4. 视野处理：
+     *      - tick==0：完全重算视野（先清空再按所有小车当前位置照亮）
+     *      - tick>0：仅增量点亮新位置（保留历史探索）
+     *   5. 设置状态为 IDLE（让调度器重新分配目标）
+     */
+    private void handleMoveCar(JSONObject data) {
+        if (data == null) return;
+        String carId = data.getString("carId");
+        if (carId == null || carId.isEmpty()) {
+            log.warn("MOVE_CAR: carId is empty");
+            return;
+        }
+
+        int x = data.getIntValue("x", -1);
+        int y = data.getIntValue("y", -1);
+        if (x < 0 || y < 0) {
+            log.warn("MOVE_CAR: invalid position ({}, {})", x, y);
+            return;
+        }
+
+        int mapWidth = blackboard.getMapWidth();
+        int mapHeight = blackboard.getMapHeight();
+        if (x >= mapWidth || y >= mapHeight) {
+            log.warn("MOVE_CAR: position ({}, {}) out of bounds ({}×{})", x, y, mapWidth, mapHeight);
+            return;
+        }
+
+        // 0. 读取旧位置（用于后续清理视野）
+        Point oldPos = blackboard.getCarPosition(carId);
+
+        log.info("Moving car {} from ({}, {}) to ({}, {})",
+                carId,
+                oldPos != null ? oldPos.getX() : -1,
+                oldPos != null ? oldPos.getY() : -1,
+                x, y);
+
+        // 1. 清除当前目标和路径
+        blackboard.clearCarTarget(carId);
+        blackboard.clearCarRouteList(carId);
+
+        // 2. 设置新位置
+        blackboard.setCarPosition(carId, x, y);
+
+        // 3. 视野处理
+        long currentTick = tickCount.get();
+        if (currentTick == 0) {
+            // 仿真尚未启动：完全重算视野，严格按当前所有小车位置照亮
+            blackboard.recalculateFullVision(mapWidth, mapHeight);
+            log.info("Simulation not started yet, recalculated full vision after moving {} to ({}, {})",
+                    carId, x, y);
+        } else {
+            // 仿真已启动：仅增量点亮新位置（保留所有历史探索数据）
+            blackboard.illuminateArea(x, y, mapWidth, mapHeight);
+        }
+
+        // 5. 设置状态为 IDLE，让调度器重新分配目标和路径
+        blackboard.setCarStatus(carId, CarStatus.IDLE);
+
+        log.info("Car {} moved to ({}, {}), target/route cleared, status=IDLE", carId, x, y);
+
+        // 6. 广播视图更新
+        broadcastViewUpdate(currentTick);
+    }
+
+    /**
+     * 启动新的 Car JVM 进程
+     * 使用与一键启动.bat 相同的 classpath 和启动参数
+     */
+    private void spawnCarProcess(String carId) throws IOException {
+        String javaHome = System.getProperty("java.home");
+        String javaExe = javaHome + "\\bin\\java.exe";
+        String userDir = System.getProperty("user.dir");
+
+        // 构建 classpath（与一键启动.bat 一致）
+        String m2Repo = System.getProperty("user.home") + "\\.m2\\repository";
+        String commonJar = userDir + "\\common\\target\\common-1.0-SNAPSHOT.jar";
+        String carJar = userDir + "\\car\\target\\car-1.0-SNAPSHOT.jar";
+        String[] depJars = {
+            m2Repo + "\\redis\\clients\\jedis\\5.0.2\\jedis-5.0.2.jar",
+            m2Repo + "\\com\\rabbitmq\\amqp-client\\5.18.0\\amqp-client-5.18.0.jar",
+            m2Repo + "\\com\\alibaba\\fastjson2\\fastjson2\\2.0.47\\fastjson2-2.0.47.jar",
+            m2Repo + "\\org\\slf4j\\slf4j-api\\2.0.9\\slf4j-api-2.0.9.jar",
+            m2Repo + "\\ch\\qos\\logback\\logback-classic\\1.5.6\\logback-classic-1.5.6.jar",
+            m2Repo + "\\ch\\qos\\logback\\logback-core\\1.5.6\\logback-core-1.5.6.jar",
+            m2Repo + "\\org\\apache\\commons\\commons-pool2\\2.12.0\\commons-pool2-2.12.0.jar",
+        };
+
+        StringBuilder cp = new StringBuilder();
+        cp.append(commonJar);
+        for (String dep : depJars) {
+            cp.append(";").append(dep);
+        }
+        cp.append(";").append(carJar);
+
+        ProcessBuilder pb = new ProcessBuilder(
+            javaExe, "-cp", cp.toString(),
+            "inspection.car.CarMain", carId
+        );
+        pb.directory(new java.io.File(userDir));
+        pb.redirectErrorStream(true);
+        pb.inheritIO();  // 输出到当前控制台
+
+        Process process = pb.start();
+        // 记录进程引用，以便运行时删除
+        carProcesses.put(carId, process);
+        log.info("Spawned Car process for {} (PID: ~{})", carId, process.pid());
+    }
+
     // ==================== Web命令转发 ====================
 
     /**
@@ -378,6 +630,7 @@ public class ControllerAgent {
     private void forwardWebCommand(String cmd, JSONObject data) {
         String forwardCmd = switch (cmd) {
             case CMD_SET_CONFIG -> CMD_FORWARD_CONFIG;
+            case CMD_SET_MAP_EDIT -> CMD_FORWARD_MAP_EDIT;
             case CMD_RESET -> CMD_FORWARD_RESET;
             default -> null;
         };

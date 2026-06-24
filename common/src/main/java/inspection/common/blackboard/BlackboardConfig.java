@@ -9,8 +9,8 @@ public class BlackboardConfig {
     private String password = null;
     private int database = 0;
     private int timeoutMs = 5000;
-    private int maxTotal = 10;
-    private int maxIdle = 5;
+    private int maxTotal = 50;
+    private int maxIdle = 20;
 
     public BlackboardConfig() {}
 

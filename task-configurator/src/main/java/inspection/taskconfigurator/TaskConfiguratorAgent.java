@@ -115,6 +115,7 @@ public class TaskConfiguratorAgent {
         logger.info("收到命令: cmd={}", cmd);
         switch (cmd) {
             case "FORWARD_CONFIG" -> handleSetConfig(data);
+            case "FORWARD_MAP_EDIT" -> handleMapEdit(data);
             case "FORWARD_RESET" -> handleReset();
             default -> logger.warn("未知命令: {}", cmd);
         }
@@ -122,6 +123,7 @@ public class TaskConfiguratorAgent {
 
     /**
      * 处理配置命令（初始化仿真）
+     * 支持自定义障碍物和小车位置（如果提供则使用，否则随机生成）
      */
     private void handleSetConfig(JSONObject data) {
         try {
@@ -129,9 +131,84 @@ public class TaskConfiguratorAgent {
             int mapHeight = data.getIntValue("mapHeight", Constants.DEFAULT_MAP_HEIGHT);
             int carCount = data.getIntValue("carCount", Constants.DEFAULT_CAR_COUNT);
             double obstacleDensity = data.getDoubleValue("obstacleDensity");
-            if (obstacleDensity == 0.0) obstacleDensity = Constants.DEFAULT_OBSTACLE_DENSITY;
             String algorithm = data.getString("algorithm");
             if (algorithm == null) algorithm = Constants.DEFAULT_ALGORITHM;
+
+            // 检查是否提供了自定义障碍物和小车位置
+            boolean hasCustomObstacles = data.containsKey("customObstacles");
+            boolean hasCarPositions = data.containsKey("carPositions");
+
+            if (hasCustomObstacles || hasCarPositions) {
+                // 使用自定义数据（与 handleMapEdit 相同逻辑）
+                logger.info("开始初始化仿真(自定义): map={}x{}, cars={}, algorithm={}",
+                        mapWidth, mapHeight, carCount, algorithm);
+
+                // 1. 清空黑板
+                blackboard.clearAll();
+
+                // 2. 写入 TaskConfig
+                Map<String, String> config = new HashMap<>();
+                config.put("mapWidth", String.valueOf(mapWidth));
+                config.put("mapHeight", String.valueOf(mapHeight));
+                config.put("carCount", String.valueOf(carCount));
+                config.put("obstacleDensity", String.valueOf(obstacleDensity));
+                config.put("algorithm", algorithm);
+                config.put("taskActive", "true");
+                config.put("tickInterval", String.valueOf(Constants.DEFAULT_TICK_INTERVAL_MS));
+                blackboard.setTaskConfig(config);
+
+                // 3. 写入自定义障碍物
+                if (hasCustomObstacles) {
+                    List<JSONObject> customObstacles = data.getList("customObstacles", JSONObject.class);
+                    if (customObstacles != null && !customObstacles.isEmpty()) {
+                        List<Point> obstacles = new ArrayList<>();
+                        for (JSONObject obj : customObstacles) {
+                            int x = obj.getIntValue("x", -1);
+                            int y = obj.getIntValue("y", -1);
+                            if (x >= 0 && x < mapWidth && y >= 0 && y < mapHeight) {
+                                obstacles.add(new Point(x, y));
+                            }
+                        }
+                        blackboard.setMapBlockBitsBatch(obstacles, mapWidth);
+                        logger.info("自定义障碍物 {} 个已写入", obstacles.size());
+                    } else {
+                        // 空数组表示无自定义障碍物，使用密度随机生成
+                        if (obstacleDensity == 0.0) obstacleDensity = Constants.DEFAULT_OBSTACLE_DENSITY;
+                        initializeObstacles(mapWidth, mapHeight, obstacleDensity, carCount);
+                    }
+                } else {
+                    // 无自定义障碍物，随机生成
+                    if (obstacleDensity == 0.0) obstacleDensity = Constants.DEFAULT_OBSTACLE_DENSITY;
+                    initializeObstacles(mapWidth, mapHeight, obstacleDensity, carCount);
+                }
+
+                // 4. 写入自定义小车位置
+                if (hasCarPositions) {
+                    List<JSONObject> carPositions = data.getList("carPositions", JSONObject.class);
+                    if (carPositions != null && !carPositions.isEmpty()) {
+                        initializeCarsWithPositions(carPositions, mapWidth, mapHeight);
+                    } else {
+                        initializeCars(carCount, mapWidth, mapHeight);
+                    }
+                } else {
+                    initializeCars(carCount, mapWidth, mapHeight);
+                }
+
+                // 5. 声明队列
+                messageBus.declareAllSystemQueues(carCount);
+
+                // 6. 通知 Controller
+                JSONObject notifyData = new JSONObject();
+                notifyData.put("carCount", carCount);
+                notifyData.put("mapWidth", mapWidth);
+                notifyData.put("mapHeight", mapHeight);
+                messageBus.publish(Constants.QUEUE_CONTROLLER_CMD, "TASK_READY", notifyData);
+                logger.info("已通知 Controller: TASK_READY (自定义模式)");
+                return;
+            }
+
+            // === 无自定义数据，使用随机生成（原有逻辑） ===
+            if (obstacleDensity == 0.0) obstacleDensity = Constants.DEFAULT_OBSTACLE_DENSITY;
 
             logger.info("开始初始化仿真: map={}x{}, cars={}, density={}, algorithm={}",
                     mapWidth, mapHeight, carCount, obstacleDensity, algorithm);
@@ -175,6 +252,122 @@ public class TaskConfiguratorAgent {
         } catch (Exception e) {
             logger.error("初始化仿真失败", e);
         }
+    }
+
+    /**
+     * 处理地图编辑命令（用户自定义障碍物和小车位置）
+     */
+    private void handleMapEdit(JSONObject data) {
+        try {
+            int mapWidth = data.getIntValue("mapWidth", Constants.DEFAULT_MAP_WIDTH);
+            int mapHeight = data.getIntValue("mapHeight", Constants.DEFAULT_MAP_HEIGHT);
+            int carCount = data.getIntValue("carCount", Constants.DEFAULT_CAR_COUNT);
+            String algorithm = data.getString("algorithm");
+            if (algorithm == null) algorithm = Constants.DEFAULT_ALGORITHM;
+
+            logger.info("开始地图编辑初始化: map={}x{}, cars={}, algorithm={}",
+                    mapWidth, mapHeight, carCount, algorithm);
+
+            // 1. 清空黑板
+            blackboard.clearAll();
+
+            // 2. 写入 TaskConfig
+            Map<String, String> config = new HashMap<>();
+            config.put("mapWidth", String.valueOf(mapWidth));
+            config.put("mapHeight", String.valueOf(mapHeight));
+            config.put("carCount", String.valueOf(carCount));
+            config.put("obstacleDensity", "0"); // 自定义障碍物
+            config.put("algorithm", algorithm);
+            config.put("taskActive", "true");
+            config.put("tickInterval", String.valueOf(Constants.DEFAULT_TICK_INTERVAL_MS));
+            blackboard.setTaskConfig(config);
+
+            // 3. 写入自定义障碍物
+            List<JSONObject> customObstacles = data.getList("customObstacles", JSONObject.class);
+            if (customObstacles != null && !customObstacles.isEmpty()) {
+                List<Point> obstacles = new ArrayList<>();
+                for (JSONObject obj : customObstacles) {
+                    int x = obj.getIntValue("x", -1);
+                    int y = obj.getIntValue("y", -1);
+                    if (x >= 0 && x < mapWidth && y >= 0 && y < mapHeight) {
+                        obstacles.add(new Point(x, y));
+                    }
+                }
+                blackboard.setMapBlockBitsBatch(obstacles, mapWidth);
+                logger.info("自定义障碍物 {} 个已写入", obstacles.size());
+            } else {
+                // 没有自定义障碍物，使用密度随机生成
+                initializeObstacles(mapWidth, mapHeight, Constants.DEFAULT_OBSTACLE_DENSITY, carCount);
+            }
+
+            // 4. 写入自定义小车位置
+            List<JSONObject> carPositions = data.getList("carPositions", JSONObject.class);
+            if (carPositions != null && !carPositions.isEmpty()) {
+                initializeCarsWithPositions(carPositions, mapWidth, mapHeight);
+            } else {
+                // 没有自定义位置，使用默认位置
+                initializeCars(carCount, mapWidth, mapHeight);
+            }
+
+            // 5. 声明队列
+            messageBus.declareAllSystemQueues(carCount);
+
+            // 6. 通知 Controller
+            JSONObject notifyData = new JSONObject();
+            notifyData.put("carCount", carCount);
+            notifyData.put("mapWidth", mapWidth);
+            notifyData.put("mapHeight", mapHeight);
+            messageBus.publish(Constants.QUEUE_CONTROLLER_CMD, "TASK_READY", notifyData);
+            logger.info("地图编辑初始化完成，已通知 Controller");
+
+        } catch (Exception e) {
+            logger.error("地图编辑初始化失败", e);
+        }
+    }
+
+    /**
+     * 使用自定义位置初始化小车
+     */
+    private void initializeCarsWithPositions(List<JSONObject> carPositions, int mapWidth, int mapHeight) {
+        List<Point> illuminatedCells = new ArrayList<>();
+
+        for (int i = 0; i < carPositions.size(); i++) {
+            JSONObject obj = carPositions.get(i);
+            String carId = obj.getString("carId");
+            if (carId == null) {
+                carId = String.format("Car%03d", i + 1);
+            }
+            int x = obj.getIntValue("x", 0);
+            int y = obj.getIntValue("y", 0);
+
+            // 确保坐标在边界内
+            x = Math.max(0, Math.min(x, mapWidth - 1));
+            y = Math.max(0, Math.min(y, mapHeight - 1));
+
+            Point pos = new Point(x, y);
+
+            // 设置位置
+            blackboard.setCarPosition(carId, pos);
+            blackboard.setCarStatus(carId, CarStatus.IDLE);
+            blackboard.setCarSteps(carId, 0);
+
+            // 收集3x3视野
+            for (int dx = -Constants.VISION_RANGE; dx <= Constants.VISION_RANGE; dx++) {
+                for (int dy = -Constants.VISION_RANGE; dy <= Constants.VISION_RANGE; dy++) {
+                    int nx = x + dx;
+                    int ny = y + dy;
+                    if (nx >= 0 && nx < mapWidth && ny >= 0 && ny < mapHeight) {
+                        illuminatedCells.add(new Point(nx, ny));
+                    }
+                }
+            }
+
+            logger.info("小车 {} 初始位置: ({}, {})", carId, x, y);
+        }
+
+        // 批量点亮视野
+        blackboard.setMapViewBitsBatch(illuminatedCells, mapWidth);
+        logger.info("点亮初始视野 {} 个格子", illuminatedCells.size());
     }
 
     /**

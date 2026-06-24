@@ -6,13 +6,29 @@ import { COLORS, CAR_COLORS, ROUTE_ALPHA } from './constants.js'
 
 /** 计算方格尺寸与居中偏移（文档 5.2） */
 export function computeGeometry(canvasW, canvasH, mapW, mapH) {
-  if (!mapW || !mapH || !canvasW || !canvasH) {
-    return { cellSize: 0, offsetX: 0, offsetY: 0, mapW, mapH }
+  // 严格校验所有参数为有效正数
+  const w = Number(mapW)
+  const h = Number(mapH)
+  const cw = Number(canvasW)
+  const ch = Number(canvasH)
+  if (!(w > 0 && h > 0 && cw > 0 && ch > 0)) {
+    return { cellSize: 0, offsetX: 0, offsetY: 0, mapW: w, mapH: h }
   }
-  const cellSize = Math.floor(Math.min(canvasW / mapW, canvasH / mapH))
-  const offsetX = Math.floor((canvasW - cellSize * mapW) / 2)
-  const offsetY = Math.floor((canvasH - cellSize * mapH) / 2)
-  return { cellSize, offsetX, offsetY, mapW, mapH }
+  const cellSize = Math.floor(Math.min(cw / w, ch / h))
+  // cellSize 至少为 1px 才能渲染
+  if (cellSize < 1) {
+    return { cellSize: 0, offsetX: 0, offsetY: 0, mapW: w, mapH: h }
+  }
+  const offsetX = Math.floor((cw - cellSize * w) / 2)
+  const offsetY = Math.floor((ch - cellSize * h) / 2)
+  return { cellSize, offsetX, offsetY, mapW: w, mapH: h }
+}
+
+/** 从小车ID中提取编号（如 Car003 → 3） */
+export function extractCarNumber(carId) {
+  if (!carId) return 0
+  const m = carId.match(/\d+/)
+  return m ? parseInt(m[0], 10) : 0
 }
 
 /** 取第 index 辆小车的颜色（循环复用） */
@@ -36,6 +52,7 @@ export function drawExploration(ctx, mapView, geo) {
     const row = mapView[y]
     if (!row) continue
     for (let x = 0; x < row.length; x++) {
+      // 已探索：浅色；未探索：统一灰色
       ctx.fillStyle = row[x] ? COLORS.EXPLORED : COLORS.UNEXPLORED
       const { px, py } = cellPixel(x, y, geo)
       ctx.fillRect(px, py, cellSize, cellSize)
@@ -63,18 +80,43 @@ export function drawGrid(ctx, mapW, mapH, geo) {
   ctx.stroke()
 }
 
-/** 层3：障碍层（静态障碍 + 动态障碍/小车占据格） */
-export function drawObstacles(ctx, mapBlock, carCellSet, geo) {
+/** 层3：障碍层（仅绘制已探索格子上的障碍）
+ *  通过 mapView 检查：未探索区域不显示障碍物，避免用户提前看到红色障碍标识 */
+export function drawObstacles(ctx, mapBlock, carCellSet, geo, mapView) {
   const { cellSize } = geo
   for (let y = 0; y < mapBlock.length; y++) {
     const row = mapBlock[y]
     if (!row) continue
     for (let x = 0; x < row.length; x++) {
       if (!row[x]) continue
+      // 只有已探索的格子才绘制障碍物（未探索区域统一显示为灰色）
+      if (!mapView[y]?.[x]) continue
       const isDynamic = carCellSet.has(x + ',' + y)
-      ctx.fillStyle = isDynamic ? COLORS.DYNAMIC_OBSTACLE : COLORS.OBSTACLE
       const { px, py } = cellPixel(x, y, geo)
+
+      // 底色填充
+      ctx.fillStyle = isDynamic ? COLORS.DYNAMIC_OBSTACLE : COLORS.OBSTACLE
       ctx.fillRect(px + 1, py + 1, cellSize - 1, cellSize - 1)
+
+      // X 纹理（格子足够大时才绘制，提升障碍物辨识度）
+      if (cellSize >= 6) {
+        const lineW = Math.max(1, Math.floor(cellSize * 0.08))
+        const pad = Math.max(2, Math.floor(cellSize * 0.12))
+        ctx.save()
+        ctx.strokeStyle = isDynamic ? 'rgba(255,200,200,0.55)' : 'rgba(0,0,0,0.3)'
+        ctx.lineWidth = lineW
+        // 对角线1: 左上→右下
+        ctx.beginPath()
+        ctx.moveTo(px + pad, py + pad)
+        ctx.lineTo(px + cellSize - pad, py + cellSize - pad)
+        ctx.stroke()
+        // 对角线2: 右上→左下
+        ctx.beginPath()
+        ctx.moveTo(px + cellSize - pad, py + pad)
+        ctx.lineTo(px + pad, py + cellSize - pad)
+        ctx.stroke()
+        ctx.restore()
+      }
     }
   }
 }
@@ -87,10 +129,11 @@ export function drawRoutes(ctx, cars, geo) {
   ctx.lineWidth = 2
   ctx.lineJoin = 'round'
   ctx.lineCap = 'round'
-  cars.forEach((car, i) => {
+  cars.forEach((car) => {
     const route = car.route
     if (!Array.isArray(route) || route.length < 2) return
-    ctx.strokeStyle = getCarColor(i)
+    const num = extractCarNumber(car.carId)
+    ctx.strokeStyle = getCarColor(num - 1)
     ctx.beginPath()
     for (let k = 0; k < route.length; k++) {
       const pt = route[k]
@@ -134,10 +177,11 @@ function drawStar(ctx, cx, cy, spikes, outerR, innerR) {
 /** 层6：小车层（圆形车身 + 方向指针 + 高亮环 + 序号） */
 export function drawCars(ctx, cars, geo, activeCarId) {
   const r = Math.max(3, geo.cellSize * 0.38)
-  cars.forEach((car, i) => {
+  cars.forEach((car) => {
     if (typeof car.x !== 'number' || typeof car.y !== 'number') return
     const { cx, cy } = cellCenter(car.x, car.y, geo)
-    const color = getCarColor(i)
+    const num = extractCarNumber(car.carId)
+    const color = getCarColor(num - 1)
 
     // 联动高亮环
     if (activeCarId && car.carId === activeCarId) {
@@ -172,13 +216,14 @@ export function drawCars(ctx, cars, geo, activeCarId) {
     ctx.lineWidth = 1
     ctx.stroke()
 
-    // 序号（格子足够大时）
+    // 序号（格子足够大时，从carId中提取编号确保与右侧列表一致）
     if (geo.cellSize >= 14) {
       ctx.fillStyle = '#1a1a1a'
       ctx.font = `bold ${Math.floor(r)}px sans-serif`
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
-      ctx.fillText(String(i + 1), cx, cy)
+      const num = extractCarNumber(car.carId)
+      ctx.fillText(String(num), cx, cy)
     }
   })
 }

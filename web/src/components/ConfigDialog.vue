@@ -1,13 +1,15 @@
 <script setup>
 import { ref, watch } from 'vue'
-import { ALGORITHMS, DEFAULT_CONFIG } from '../utils/constants.js'
+import { useSimulationStore } from '../store/simulationStore.js'
+import { ALGORITHMS, DEFAULT_CONFIG, CAR_COLORS } from '../utils/constants.js'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
   config: { type: Object, default: () => ({ ...DEFAULT_CONFIG }) }
 })
-const emit = defineEmits(['confirm', 'cancel'])
+const emit = defineEmits(['confirm', 'cancel', 'enter-edit'])
 
+const store = useSimulationStore()
 const form = ref({ ...DEFAULT_CONFIG })
 
 // 每次打开弹窗时，用当前配置回填表单
@@ -34,6 +36,23 @@ function onConfirm() {
     algorithm: f.algorithm
   }
   emit('confirm', payload)
+}
+
+function onEnterEdit() {
+  // 先保存当前配置参数到 store，然后进入编辑模式
+  const f = form.value
+  store.enterEditMode({
+    mapWidth: clamp(f.mapWidth, 5, 200),
+    mapHeight: clamp(f.mapHeight, 5, 200),
+    carCount: clamp(f.carCount, 1, 50),
+    obstacleDensity: clamp(f.obstacleDensity, 0, 0.9),
+    algorithm: f.algorithm
+  })
+  emit('enter-edit')
+}
+
+function getCarColor(idx) {
+  return CAR_COLORS[idx % CAR_COLORS.length]
 }
 </script>
 
@@ -63,7 +82,10 @@ function onConfirm() {
           <option v-for="a in ALGORITHMS" :key="a.value" :value="a.value">{{ a.label }}</option>
         </select>
       </label>
+
       <div class="dlg-actions">
+        <button class="btn outline" @click="onEnterEdit">地图编辑器</button>
+        <div class="spacer"></div>
         <button class="btn" @click="$emit('cancel')">取消</button>
         <button class="btn primary" @click="onConfirm">确认</button>
       </div>
@@ -119,9 +141,12 @@ select:focus {
 }
 .dlg-actions {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
   gap: 10px;
   margin-top: 20px;
+}
+.spacer {
+  flex: 1;
 }
 .btn {
   background: #3a3a3a;
@@ -142,5 +167,13 @@ select:focus {
 }
 .btn.primary:hover {
   background: #6fcef9;
+}
+.btn.outline {
+  background: transparent;
+  border-color: #ff9800;
+  color: #ff9800;
+}
+.btn.outline:hover {
+  background: rgba(255, 152, 0, 0.12);
 }
 </style>

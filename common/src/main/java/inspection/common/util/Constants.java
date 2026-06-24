@@ -44,8 +44,10 @@ public final class Constants {
 
     // ===== MQ 命令名 =====
     public static final String CMD_SET_CONFIG = "SET_CONFIG";
+    public static final String CMD_SET_MAP_EDIT = "SET_MAP_EDIT";
     public static final String CMD_RESET = "RESET";
     public static final String CMD_FORWARD_CONFIG = "FORWARD_CONFIG";
+    public static final String CMD_FORWARD_MAP_EDIT = "FORWARD_MAP_EDIT";
     public static final String CMD_FORWARD_RESET = "FORWARD_RESET";
     public static final String CMD_TASK_READY = "TASK_READY";
     public static final String CMD_ASSIGN_TARGET = "ASSIGN_TARGET";
@@ -61,6 +63,9 @@ public final class Constants {
     public static final String CMD_PAUSE = "PAUSE";
     public static final String CMD_RESUME = "RESUME";
     public static final String CMD_STEP_ONCE = "STEP_ONCE";
+    public static final String CMD_ADD_CAR = "ADD_CAR";
+    public static final String CMD_DELETE_CAR = "DELETE_CAR";
+    public static final String CMD_MOVE_CAR = "MOVE_CAR";
 
     public static String getCarQueueName(String carId) {
         return "Car_" + carId;
@@ -70,6 +75,7 @@ public final class Constants {
     public static final String REDIS_KEY_MAP_VIEW = "mapView";
     public static final String REDIS_KEY_MAP_BLOCK = "mapBlock";
     public static final String REDIS_KEY_TASK_CONFIG = "TaskConfig";
+    public static final String REDIS_KEY_SIMULATION_PAUSED = "simulation:paused";
     public static final String REDIS_KEY_LOCK_PREFIX = "lock:";
 
     public static String getCarPositionKey(String carId) {

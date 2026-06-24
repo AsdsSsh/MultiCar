@@ -1,0 +1,14 @@
+inspection\common\blackboard\DistributedLock.class
+inspection\common\messaging\MessageType.class
+inspection\common\model\Point.class
+inspection\common\blackboard\BlackboardClient.class
+inspection\common\blackboard\BlackboardConfig.class
+inspection\common\messaging\MessageBus$MessageHandler.class
+inspection\common\model\CarStatus.class
+inspection\common\messaging\MessageConfig.class
+inspection\common\config\ConnectionConfig.class
+inspection\common\model\CarInfo.class
+inspection\common\messaging\MessageBus.class
+inspection\common\util\Constants.class
+inspection\common\model\SimulationState.class
+inspection\common\model\RouteAlgorithm.class

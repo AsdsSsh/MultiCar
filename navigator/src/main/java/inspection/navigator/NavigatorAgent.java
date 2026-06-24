@@ -107,6 +107,7 @@ public class NavigatorAgent implements AutoCloseable {
         int mapWidth = blackboard.getMapWidth();
         int mapHeight = blackboard.getMapHeight();
         boolean[] mapBlock = blackboard.getFullMapBlock(mapWidth, mapHeight);
+        boolean[] mapView = blackboard.getFullMapView(mapWidth, mapHeight);
 
         // 2. 参数校验
         if (start == null) {
@@ -123,9 +124,9 @@ public class NavigatorAgent implements AutoCloseable {
         // 3. 将其他小车位置作为临时障碍加入（避免多车碰撞）
         addOtherCarsAsObstacles(mapBlock, carId, mapWidth, mapHeight);
 
-        // 4. 选择算法并搜索
+        // 4. 选择算法并搜索 → 传入 mapView 以实现视野约束
         PathFinder finder = pathFinders.getOrDefault(algorithm, pathFinders.get(RouteAlgorithm.BFS));
-        List<Point> route = finder.findPath(start, target, mapWidth, mapHeight, mapBlock);
+        List<Point> route = finder.findPath(start, target, mapWidth, mapHeight, mapBlock, mapView);
 
         // 5. 写入黑板（⚠ 只写 RouteList，不写 Status）
         if (!route.isEmpty()) {

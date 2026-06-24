@@ -2,6 +2,7 @@ package inspection.controller;
 
 import inspection.common.blackboard.BlackboardClient;
 import inspection.common.blackboard.BlackboardConfig;
+import inspection.common.config.ConnectionConfig;
 import inspection.common.messaging.MessageBus;
 import inspection.common.messaging.MessageConfig;
 import org.slf4j.Logger;
@@ -23,19 +24,12 @@ public class ControllerMain {
     public static void main(String[] args) {
         log.info("=== Controller Starting ===");
 
-        // 1. 初始化黑板连接
-        BlackboardConfig bbConfig = new BlackboardConfig();
-        // 可通过环境变量/系统属性覆盖默认配置
-        bbConfig.setHost(System.getProperty("redis.host", "localhost"));
-        bbConfig.setPort(Integer.getInteger("redis.port", 6379));
-
+        // 1. 初始化黑板连接（统一配置：环境变量 > 系统属性 > config.properties）
+        BlackboardConfig bbConfig = ConnectionConfig.loadBlackboardConfig();
         BlackboardClient blackboard = new BlackboardClient(bbConfig);
 
         // 2. 初始化消息总线
-        MessageConfig mqConfig = new MessageConfig();
-        mqConfig.setHost(System.getProperty("rabbitmq.host", "localhost"));
-        mqConfig.setPort(Integer.getInteger("rabbitmq.port", 5672));
-
+        MessageConfig mqConfig = ConnectionConfig.loadMessageConfig();
         MessageBus messageBus = new MessageBus(mqConfig);
 
         try {

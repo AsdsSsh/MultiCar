@@ -7,7 +7,7 @@ defineProps({
   index: { type: Number, default: 0 },
   active: { type: Boolean, default: false }
 })
-const emit = defineEmits(['hover', 'leave'])
+const emit = defineEmits(['hover', 'leave', 'delete-car', 'move-car'])
 
 function label(s) {
   return STATUS_LABELS[s] || s || '未知'
@@ -29,6 +29,8 @@ function statusColor(s) {
       <span class="cid">{{ car.carId }}</span>
       <span class="status" :style="{ color: statusColor(car.status) }">{{ label(car.status) }}</span>
       <span class="steps">步数:{{ car.steps ?? 0 }}</span>
+      <button class="act-btn move-btn" title="移动小车到新位置" @click.stop="emit('move-car', car.carId)">📍</button>
+      <button class="act-btn del-btn" title="删除小车" @click.stop="emit('delete-car', car.carId)">✕</button>
     </div>
     <div class="line2">
       位置({{ car.x }},{{ car.y }}) → 目标({{ car.targetX ?? '-' }},{{ car.targetY ?? '-' }})
@@ -79,5 +81,34 @@ function statusColor(s) {
   font-size: 12px;
   color: #888;
   padding-left: 16px;
+}
+
+/* 操作按钮 */
+.act-btn {
+  width: 22px;
+  height: 22px;
+  border: 1px solid #444;
+  border-radius: 4px;
+  background: #2a2a2a;
+  color: #999;
+  font-size: 11px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  flex-shrink: 0;
+  transition: all 0.15s;
+  line-height: 1;
+}
+.move-btn:hover {
+  background: rgba(79, 195, 247, 0.2);
+  border-color: #4fc3f7;
+  color: #4fc3f7;
+}
+.del-btn:hover {
+  background: rgba(229, 115, 115, 0.2);
+  border-color: #e57373;
+  color: #e57373;
 }
 </style>

@@ -3,8 +3,12 @@
 // 对应方案设计文档「五、Canvas渲染设计 5.4」与「一、接口规范」
 // ============================================================
 
-/** WebSocket 默认连接地址（WSB 仿真通道） */
-export const WS_URL = 'ws://localhost:8887/ws/simulation'
+/**
+ * WebSocket 连接地址（WSB 仿真通道）
+ * 分布式部署时，请将 localhost 改为 Display 服务所在机器的 IP 地址
+ * 例如: 'ws://192.168.1.100:8887/ws/simulation'
+ */
+export const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8887/ws/simulation'
 
 /** 默认仿真配置 */
 export const DEFAULT_CONFIG = {
@@ -18,10 +22,20 @@ export const DEFAULT_CONFIG = {
 /** 前端 → WSB 命令枚举（统一 JSON：{cmd,data,timestamp}） */
 export const COMMANDS = {
   SET_CONFIG: 'SET_CONFIG',
+  SET_MAP_EDIT: 'SET_MAP_EDIT',
   RESET: 'RESET',
   PAUSE: 'PAUSE',
   RESUME: 'RESUME',
-  STEP_ONCE: 'STEP_ONCE'
+  STEP_ONCE: 'STEP_ONCE',
+  ADD_CAR: 'ADD_CAR',
+  DELETE_CAR: 'DELETE_CAR',
+  MOVE_CAR: 'MOVE_CAR'
+}
+
+/** WebSocket 服务端推送消息类型 */
+export const WS_TYPES = {
+  STATE_UPDATE: 'STATE_UPDATE',
+  MAP_LIST_UPDATED: 'MAP_LIST_UPDATED'
 }
 
 /** 路径规划算法选项 */
@@ -60,7 +74,7 @@ export const STATUS_COLORS = {
 /** Canvas 颜色方案（文档 5.4） */
 export const COLORS = {
   BACKGROUND: '#1a1a1a',
-  UNEXPLORED: '#2d2d2d',
+  UNEXPLORED: '#5a5a5a',
   EXPLORED: '#dcdcdc',
   GRID: '#555555',
   OBSTACLE: '#cc4444',

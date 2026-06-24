@@ -3,7 +3,7 @@ defineProps({
   title: { type: String, default: '变电站巡检仿真系统' },
   connected: { type: Boolean, default: false }
 })
-defineEmits(['open-config', 'reset'])
+defineEmits(['open-config', 'reset', 'addCar'])
 </script>
 
 <template>
@@ -16,6 +16,7 @@ defineEmits(['open-config', 'reset'])
       </span>
     </div>
     <div class="actions">
+      <button class="btn add-car" @click="$emit('addCar')">＋ 添加小车</button>
       <button class="btn" @click="$emit('open-config')">⚙ 配置</button>
       <button class="btn" @click="$emit('reset')">↺ 重置</button>
     </div>
@@ -80,5 +81,15 @@ h1 {
 }
 .btn:hover {
   background: #4a4a4a;
+}
+.btn.add-car {
+  background: #ff9800;
+  border-color: #ff9800;
+  color: #fff;
+  font-weight: 600;
+}
+.btn.add-car:hover {
+  background: #ffb74d;
+  border-color: #ffb74d;
 }
 </style>

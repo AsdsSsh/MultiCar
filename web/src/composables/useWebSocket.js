@@ -1,12 +1,11 @@
 import { ref, onBeforeUnmount } from 'vue'
-import { WS_URL } from '../utils/constants.js'
+import { WS_URL, WS_TYPES } from '../utils/constants.js'
 
 // ============================================================
 // WebSocket 连接管理
 // 功能：自动重连（指数退避）+ 心跳维持 + 命令发送
-// 对应方案设计文档「七、WebSocket连接管理」
 // ============================================================
-export function useWebSocket(store, url = WS_URL) {
+export function useWebSocket(store, url = WS_URL, callbacks = {}) {
   const connected = ref(false)
 
   let ws = null
@@ -38,11 +37,18 @@ export function useWebSocket(store, url = WS_URL) {
       let msg
       try {
         msg = JSON.parse(ev.data)
+        console.log('[WS] 收到消息:', msg.type || 'NO_TYPE', 'tick=', msg.tick)
       } catch {
+        console.log('[WS] 收到非JSON消息:', ev.data)
         return // 非 JSON（如 pong 帧）忽略
       }
-      if (msg && msg.type === 'STATE_UPDATE') {
+      if (msg && msg.type === WS_TYPES.STATE_UPDATE) {
         store.handleStateUpdate(msg)
+      }
+      if (msg && msg.type === WS_TYPES.MAP_LIST_UPDATED) {
+        if (callbacks.onMapListUpdated) {
+          callbacks.onMapListUpdated()
+        }
       }
     }
 

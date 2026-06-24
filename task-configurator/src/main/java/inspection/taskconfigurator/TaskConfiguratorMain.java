@@ -1,6 +1,7 @@
 package inspection.taskconfigurator;
 
 import inspection.common.blackboard.BlackboardConfig;
+import inspection.common.config.ConnectionConfig;
 import inspection.common.messaging.MessageConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,14 +16,9 @@ public class TaskConfiguratorMain {
     public static void main(String[] args) {
         logger.info("启动 TaskConfigurator...");
 
-        // 支持命令行参数指定 Redis/MQ 地址
-        String redisHost = getArg(args, "--redis-host", "localhost");
-        int redisPort = Integer.parseInt(getArg(args, "--redis-port", "6379"));
-        String mqHost = getArg(args, "--mq-host", "localhost");
-        int mqPort = Integer.parseInt(getArg(args, "--mq-port", "5672"));
-
-        BlackboardConfig bbConfig = new BlackboardConfig(redisHost, redisPort);
-        MessageConfig mqConfig = new MessageConfig(mqHost, mqPort);
+        // 统一配置：环境变量 > 系统属性 > config.properties
+        BlackboardConfig bbConfig = ConnectionConfig.loadBlackboardConfig();
+        MessageConfig mqConfig = ConnectionConfig.loadMessageConfig();
 
         TaskConfiguratorAgent agent = new TaskConfiguratorAgent(bbConfig, mqConfig);
 
@@ -33,14 +29,5 @@ public class TaskConfiguratorMain {
         }));
 
         agent.start();
-    }
-
-    private static String getArg(String[] args, String key, String defaultValue) {
-        for (int i = 0; i < args.length - 1; i++) {
-            if (args[i].equals(key)) {
-                return args[i + 1];
-            }
-        }
-        return defaultValue;
     }
 }
