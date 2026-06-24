@@ -34,14 +34,18 @@ public class CarAgent {
 
     public void start() {
         running = true;
-        log.info("Car {} starting (multi-session)...", carId);
-
-        messageBus.subscribe(getCarQueueName(carId), this::handleMessage);
-
-        log.info("Car {} ready, waiting for TICK_MOVE", carId);
+        log.debug("Car {} active (lazy)", carId);
     }
 
-    private void handleMessage(String cmd, JSONObject data, long timestamp) {
+    /** CarMain 兼容：独立进程模式下通过 MQ 订阅接收消息 */
+    public void startStandalone() {
+        running = true;
+        log.info("Car {} standalone, subscribing to MQ", carId);
+        messageBus.subscribe(getCarQueueName(carId), this::handleMessage);
+        log.info("Car {} ready", carId);
+    }
+
+    public void handleMessage(String cmd, JSONObject data, long timestamp) {
         if (!running) return;
 
         if (CMD_TICK_MOVE.equals(cmd)) {

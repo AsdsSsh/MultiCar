@@ -53,7 +53,7 @@ public class CarMain {
 
             // 3. 创建并启动Car
             CarAgent car = new CarAgent(carId, blackboard, messageBus, distributedLock);
-            car.start();
+            car.startStandalone();
 
             // 4. 注册关闭钩子
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {

@@ -45,6 +45,7 @@ public final class Constants {
     public static final String QUEUE_NAVIGATOR_CMD = "NavigatorCmd";
     public static final String QUEUE_TARGET_PLANNER_CMD = "TargetPlannerCmd";
     public static final String QUEUE_TASK_CONFIG_CMD = "TaskConfigCmd";
+    public static final String QUEUE_CAR_POOL = "CarPool";
 
     /** 每 session 一个 Fanout 交换器 */
     public static String getSessionFanoutExchange(String sessionId) {
@@ -142,7 +143,7 @@ public final class Constants {
         return ids;
     }
 
-    // ===== 小车初始位置（4角+中心） =====
+    // ===== 小车初始位置（4角+中心，超过5辆自动散开） =====
     public static Point getCarInitialPosition(int index, int mapWidth, int mapHeight) {
         return switch (index) {
             case 0 -> new Point(1, 1);
@@ -150,7 +151,19 @@ public final class Constants {
             case 2 -> new Point(1, mapHeight - 2);
             case 3 -> new Point(mapWidth - 2, mapHeight - 2);
             case 4 -> new Point(mapWidth / 2, mapHeight / 2);
-            default -> new Point(mapWidth / 2, mapHeight / 2);
+            default -> {
+                // 超过5辆：网格散开，避免堆叠
+                int n = index - 5;
+                int cols = 4;
+                int margin = 3;
+                int usableW = mapWidth - 2 * margin;
+                int usableH = mapHeight - 2 * margin;
+                int row = n / cols;
+                int col = n % cols;
+                int x = margin + (usableW * (col + 1)) / (cols + 1);
+                int y = margin + Math.min((usableH * (row + 1)) / (row + 2), mapHeight - margin);
+                yield new Point(Math.min(x, mapWidth - 2), Math.min(y, mapHeight - 2));
+            }
         };
     }
 

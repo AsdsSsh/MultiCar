@@ -318,8 +318,9 @@ public class ControllerAgent {
     private void broadcastTickMove(String sessionId, String carId) {
         JSONObject data = new JSONObject();
         data.put("sessionId", sessionId);
+        data.put("carId", carId);
         data.put("tick", sessions.get(sessionId) != null ? sessions.get(sessionId).tickCount.get() : 0);
-        messageBus.publish(getCarQueueName(carId), CMD_TICK_MOVE, data);
+        messageBus.publish(QUEUE_CAR_POOL, CMD_TICK_MOVE, data);
     }
 
     private void broadcastViewUpdate(SessionState session) {

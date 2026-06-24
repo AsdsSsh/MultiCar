@@ -95,11 +95,9 @@ public class MessageBus {
         declareQueue(refreshQueue);
         bindQueueToFanout(refreshQueue, fanoutExchange);
 
-        for (int i = 1; i <= carCount; i++) {
-            declareQueue(Constants.getCarQueueName(String.format("Car%03d", i)));
-        }
+        declareQueue(Constants.QUEUE_CAR_POOL);
 
-        logger.info("Session {} 队列声明完成，小车数: {}", sessionId, carCount);
+        logger.info("Session {} 队列声明完成", sessionId);
     }
 
     /**
