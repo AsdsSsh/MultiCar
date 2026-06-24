@@ -1,0 +1,18 @@
+{
+  "name": "display-node",
+  "version": "1.0.0",
+  "description": "变电站巡检仿真系统 - 展示层 Node.js 后端",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "amqplib": "^0.10.4",
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "ioredis": "^5.4.1",
+    "uuid": "^10.0.0",
+    "ws": "^8.18.0"
+  }
+}
