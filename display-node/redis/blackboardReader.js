@@ -4,21 +4,37 @@ const config = require('../config');
 
 class BlackboardReader {
   constructor() {
-    this.redis = new Redis({
+    const redisConfig = {
       host: config.redis.host,
       port: config.redis.port,
       password: config.redis.password || undefined,
       lazyConnect: true,
-    });
+      retryStrategy(times) {
+        if (times > 20) return null; // 放弃重试
+        const delay = Math.min(times * 1000, 10000);
+        console.log(`[Redis] 第 ${times} 次重试，${delay / 1000}s 后重连…`);
+        return delay;
+      },
+    };
+    this.redis = new Redis(redisConfig);
     this.carKeyPrefix = config.carKeyPrefix;
+    this._connected = false;
   }
 
   async connect() {
-    await this.redis.connect();
-    console.log(`BlackboardReader 已连接 Redis: ${config.redis.host}:${config.redis.port}`);
+    try {
+      await this.redis.connect();
+      this._connected = true;
+      console.log(`[Redis] 已连接 ${config.redis.host}:${config.redis.port}`);
+    } catch (e) {
+      this._connected = false;
+      console.warn(`[Redis] 连接失败 (${config.redis.host}:${config.redis.port}): ${e.message}`);
+      console.warn('[Redis] 服务将继续运行，Redis 恢复后自动重连');
+    }
   }
 
-  /** 读取 TaskConfig Hash */
+  get connected() { return this._connected; }
+
   async readTaskConfig() {
     const entries = await this.redis.hgetall('TaskConfig');
     const result = {};
@@ -29,27 +45,22 @@ class BlackboardReader {
     return result;
   }
 
-  /** 读取仿真暂停状态 */
   async isPaused() {
     const val = await this.redis.get('simulation:paused');
     return String(val) === '1';
   }
 
-  /** 扫描所有小车 ID */
   async scanCarIds() {
     const keys = await this.redis.keys(this.carKeyPrefix + '*:Status');
     return keys.map(k => k.replace(':Status', '')).sort();
   }
 
-  /** 读取所有小车状态 */
   async readAllCars() {
     const carIds = await this.scanCarIds();
     const cars = [];
-
     for (const carId of carIds) {
       const car = { carId };
 
-      // Position
       const posStr = await this.redis.get(carId + ':Position');
       if (posStr && posStr.startsWith('{')) {
         try {
@@ -61,11 +72,9 @@ class BlackboardReader {
       if (car.x === undefined) car.x = 0;
       if (car.y === undefined) car.y = 0;
 
-      // Status
       const status = await this.redis.get(carId + ':Status');
       car.status = status || 'IDLE';
 
-      // Target
       const targetStr = await this.redis.get(carId + ':Target');
       if (targetStr && targetStr.startsWith('{')) {
         try {
@@ -75,7 +84,6 @@ class BlackboardReader {
         } catch (e) { /* ignore */ }
       }
 
-      // RouteList
       const routeRaw = await this.redis.lrange(carId + ':RouteList', 0, -1);
       const route = [];
       if (routeRaw) {
@@ -98,7 +106,6 @@ class BlackboardReader {
       }
       car.route = route;
 
-      // Steps
       const steps = await this.redis.get(carId + ':Steps');
       car.steps = steps ? parseInt(steps, 10) : 0;
 
@@ -107,17 +114,14 @@ class BlackboardReader {
     return cars;
   }
 
-  /** 读取 mapView Bitmap → int[][] */
   async readMapView(width, height) {
     return this._readBitmap('mapView', width, height);
   }
 
-  /** 读取 mapBlock Bitmap → int[][] */
   async readMapBlock(width, height) {
     return this._readBitmap('mapBlock', width, height);
   }
 
-  /** 读取 Bitmap 原始字节并解析为二维数组 */
   async _readBitmap(key, width, height) {
     const buf = await this.redis.getBuffer(key);
     const result = [];
@@ -125,8 +129,8 @@ class BlackboardReader {
       const row = [];
       for (let x = 0; x < width; x++) {
         const bitIndex = y * width + x;
-        const byteIdx = bitIndex >>> 3;       // Math.floor(bitIndex / 8)
-        const bitOffset = 7 - (bitIndex & 7); // 7 - (bitIndex % 8)
+        const byteIdx = bitIndex >>> 3;
+        const bitOffset = 7 - (bitIndex & 7);
         if (buf && byteIdx < buf.length) {
           row.push((buf[byteIdx] >>> bitOffset) & 1);
         } else {

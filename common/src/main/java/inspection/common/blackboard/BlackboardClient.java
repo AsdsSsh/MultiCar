@@ -31,7 +31,8 @@ public class BlackboardClient {
         this.jedisPool = new JedisPool(poolConfig,
                 config.getHost(),
                 config.getPort(),
-                config.getTimeoutMs());
+                config.getTimeoutMs(),
+                config.getPassword() != null && !config.getPassword().isEmpty() ? config.getPassword() : null);
     }
 
     public BlackboardClient(String host, int port) {

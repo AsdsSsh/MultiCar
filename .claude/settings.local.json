@@ -3,7 +3,12 @@
     "allow": [
       "Bash(npm install *)",
       "Bash(timeout 5 node server.js)",
-      "Bash(mvn compile *)"
+      "Bash(mvn compile *)",
+      "Bash(redis-cli -h 127.0.0.1 -p 6379 -a 123456 KEYS \"Car*\")",
+      "Bash(tasklist)",
+      "Bash(node *)",
+      "Bash(netstat -ano)",
+      "Bash(curl *)"
     ]
   }
 }
