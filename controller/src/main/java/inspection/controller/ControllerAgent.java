@@ -94,6 +94,9 @@ public class ControllerAgent {
                 case CMD_STOP -> handleStop(sessionId);
                 case CMD_RESUME -> handleResume(sessionId);
                 case CMD_STEP_ONCE -> handleStepOnce(sessionId);
+                case CMD_ADD_CAR -> handleAddCar(sessionId, data);
+                case CMD_DELETE_CAR -> handleDeleteCar(sessionId, data);
+                case CMD_MOVE_CAR -> handleMoveCar(sessionId, data);
                 default -> log.warn("Unknown command: {}", cmd);
             }
         });
@@ -302,6 +305,109 @@ public class ControllerAgent {
     private void handleStepOnce(String sessionId) {
         SessionState s = sessions.get(sessionId);
         if (s != null) tickSession(s);
+    }
+
+    // ==================== 运行时小车管理 ====================
+
+    private void handleAddCar(String sessionId, JSONObject data) {
+        if (sessionId == null) return;
+        SessionState s = sessions.get(sessionId);
+        if (s == null) return;
+
+        int mapWidth = blackboard.getMapWidth(sessionId);
+        int mapHeight = blackboard.getMapHeight(sessionId);
+
+        int maxNum = blackboard.getMaxCarNumber(sessionId);
+        String carId = String.format("Car%03d", maxNum + 1);
+
+        int x, y;
+        if (data != null && data.containsKey("x") && data.containsKey("y")) {
+            x = Math.max(0, Math.min(data.getIntValue("x"), mapWidth - 1));
+            y = Math.max(0, Math.min(data.getIntValue("y"), mapHeight - 1));
+        } else {
+            Point pos = findAvailablePosition(sessionId, mapWidth, mapHeight);
+            if (pos == null) {
+                log.warn("No available position for new car in session {}", sessionId);
+                return;
+            }
+            x = pos.getX();
+            y = pos.getY();
+        }
+
+        blackboard.setCarPosition(sessionId, carId, x, y);
+        blackboard.setCarStatus(sessionId, carId, CarStatus.IDLE);
+        blackboard.setCarSteps(sessionId, carId, 0);
+        blackboard.incrementCarCount(sessionId);
+
+        log.info("Added car {} at ({},{}) in session {}", carId, x, y, sessionId);
+        broadcastViewUpdate(s);
+    }
+
+    private void handleDeleteCar(String sessionId, JSONObject data) {
+        if (sessionId == null || data == null) return;
+        String carId = data.getString("carId");
+        if (carId == null) return;
+        SessionState s = sessions.get(sessionId);
+        if (s == null) return;
+
+        blackboard.deleteCarData(sessionId, carId);
+        blackboard.decrementCarCount(sessionId);
+
+        log.info("Deleted car {} in session {}", carId, sessionId);
+        broadcastViewUpdate(s);
+    }
+
+    private void handleMoveCar(String sessionId, JSONObject data) {
+        if (sessionId == null || data == null) return;
+        String carId = data.getString("carId");
+        if (carId == null) return;
+        SessionState s = sessions.get(sessionId);
+        if (s == null) return;
+
+        int mapWidth = blackboard.getMapWidth(sessionId);
+        int mapHeight = blackboard.getMapHeight(sessionId);
+        int x = Math.max(0, Math.min(data.getIntValue("x"), mapWidth - 1));
+        int y = Math.max(0, Math.min(data.getIntValue("y"), mapHeight - 1));
+
+        String lockKey = getLockKey(sessionId, carId);
+        distributedLock.executeWithLock(lockKey, LOCK_EXPIRE_MS, () -> {
+            blackboard.setCarPosition(sessionId, carId, x, y);
+            blackboard.clearCarRouteList(sessionId, carId);
+            blackboard.clearCarTarget(sessionId, carId);
+            blackboard.setCarStatus(sessionId, carId, CarStatus.IDLE);
+        });
+
+        log.info("Moved car {} to ({},{}) in session {}", carId, x, y, sessionId);
+        broadcastViewUpdate(s);
+    }
+
+    private Point findAvailablePosition(String sessionId, int mapWidth, int mapHeight) {
+        Map<String, Point> carPositions = blackboard.getAllCarPositions(sessionId);
+        Set<String> occupied = new HashSet<>();
+        for (Point p : carPositions.values()) {
+            occupied.add(p.getX() + "," + p.getY());
+        }
+
+        Random rand = new Random();
+        for (int attempt = 0; attempt < 500; attempt++) {
+            int x = rand.nextInt(mapWidth);
+            int y = rand.nextInt(mapHeight);
+            String key = x + "," + y;
+            if (!occupied.contains(key) && !blackboard.isPositionBlocked(sessionId, x, y)) {
+                return new Point(x, y);
+            }
+        }
+
+        // 线性扫描兜底
+        for (int y = 0; y < mapHeight; y++) {
+            for (int x = 0; x < mapWidth; x++) {
+                String key = x + "," + y;
+                if (!occupied.contains(key) && !blackboard.isPositionBlocked(sessionId, x, y)) {
+                    return new Point(x, y);
+                }
+            }
+        }
+        return null;
     }
 
     // ==================== Web 命令转发（带 sessionId） ====================

@@ -460,6 +460,26 @@ public class BlackboardClient {
         }
     }
 
+    public void incrementCarCount(String sessionId) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            jedis.hincrBy(Constants.getTaskConfigKey(sessionId), "carCount", 1);
+        }
+    }
+
+    public void decrementCarCount(String sessionId) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            jedis.hincrBy(Constants.getTaskConfigKey(sessionId), "carCount", -1);
+        }
+    }
+
+    public boolean isPositionBlocked(String sessionId, int x, int y) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            int mapWidth = getMapWidth(sessionId);
+            int offset = y * mapWidth + x;
+            return jedis.getbit(Constants.getMapBlockKey(sessionId), offset);
+        }
+    }
+
     // ==================== 视野照明 ====================
 
     public void illuminateArea(String sessionId, int x, int y, int mapWidth, int mapHeight) {
