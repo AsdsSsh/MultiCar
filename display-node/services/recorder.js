@@ -16,7 +16,7 @@ class Recorder {
   startRecording(sessionId) {
     if (this.streams.has(sessionId)) return;
     const file = path.join(REPLAY_DIR, `${sessionId}.jsonl`);
-    const stream = fs.createWriteStream(file, { flags: 'w' });
+    const stream = fs.createWriteStream(file, { flags: 'a' });
     this.streams.set(sessionId, { stream, tickCount: 0, startTime: Date.now() });
     console.log(`[REC] 开始录制 session ${sessionId}`);
   }
@@ -38,6 +38,10 @@ class Recorder {
     s.stream.end();
     this.streams.delete(sessionId);
     console.log(`[REC] 结束录制 session ${sessionId}，共 ${s.tickCount} tick`);
+  }
+
+  isRecording(sessionId) {
+    return this.streams.has(sessionId);
   }
 
   removeSession(sessionId) {

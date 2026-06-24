@@ -4,7 +4,8 @@ import { getCarColor, extractCarNumber } from '../utils/canvasDrawer.js'
 import CarStatusItem from './CarStatusItem.vue'
 
 defineProps({
-  cars: { type: Array, default: () => [] }
+  cars: { type: Array, default: () => [] },
+  readonly: { type: Boolean, default: false }
 })
 
 const emit = defineEmits(['delete-car', 'move-car'])
@@ -36,6 +37,7 @@ function carColor(car) {
       :color="carColor(car)"
       :index="extractCarNumber(car.carId)"
       :active="store.activeCarId === car.carId"
+      :readonly="readonly"
       @hover="onHover"
       @leave="onLeave"
       @delete-car="emit('delete-car', $event)"

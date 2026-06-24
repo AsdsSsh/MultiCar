@@ -361,6 +361,7 @@ function formatTime(ts) {
       <div class="actions">
         <button v-if="viewMode === 'simulation'" class="btn" @click="exitSimulation">← 返回仿真列表</button>
         <span class="user-name">{{ authStore.username }}</span>
+        <button class="btn" @click="router.push('/replay')">📼 回放</button>
         <button class="btn logout" @click="logout">退出登录</button>
       </div>
     </header>

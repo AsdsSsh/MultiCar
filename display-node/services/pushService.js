@@ -79,16 +79,12 @@ class PushService {
         }
       }
 
-      // 自动录制：tick==1 开始，running==false 停止
+      // 自动录制：tick==1 开始，持续录制直到 session 结束
       if (!this.recordedSessions.has(sessionId)) {
         recorder.startRecording(sessionId);
         this.recordedSessions.add(sessionId);
       }
       recorder.recordTick(sessionId, json);
-      if (!state.running) {
-        recorder.stopRecording(sessionId);
-        this.recordedSessions.delete(sessionId);
-      }
     } catch (e) {
       console.error(`[PUSH] 组装 STATE_UPDATE 失败 (session ${sessionId}):`, e.message);
     }

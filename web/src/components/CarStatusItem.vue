@@ -5,7 +5,8 @@ defineProps({
   car: { type: Object, required: true },
   color: { type: String, default: '#4fc3f7' },
   index: { type: Number, default: 0 },
-  active: { type: Boolean, default: false }
+  active: { type: Boolean, default: false },
+  readonly: { type: Boolean, default: false }
 })
 const emit = defineEmits(['hover', 'leave', 'delete-car', 'move-car'])
 
@@ -29,8 +30,8 @@ function statusColor(s) {
       <span class="cid">{{ car.carId }}</span>
       <span class="status" :style="{ color: statusColor(car.status) }">{{ label(car.status) }}</span>
       <span class="steps">步数:{{ car.steps ?? 0 }}</span>
-      <button class="act-btn move-btn" title="移动小车到新位置" @click.stop="emit('move-car', car.carId)">📍</button>
-      <button class="act-btn del-btn" title="删除小车" @click.stop="emit('delete-car', car.carId)">✕</button>
+      <button v-if="!readonly" class="act-btn move-btn" title="移动小车到新位置" @click.stop="emit('move-car', car.carId)">📍</button>
+      <button v-if="!readonly" class="act-btn del-btn" title="删除小车" @click.stop="emit('delete-car', car.carId)">✕</button>
     </div>
     <div class="line2">
       位置({{ car.x }},{{ car.y }}) → 目标({{ car.targetX ?? '-' }},{{ car.targetY ?? '-' }})

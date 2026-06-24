@@ -161,5 +161,14 @@ export const api = {
     return request(`/api/simulation/${id}`, {
       method: 'DELETE'
     })
+  },
+
+  // 回放
+  listReplaySessions() {
+    return request('/api/replay/sessions')
+  },
+
+  getReplaySession(sessionId) {
+    return request(`/api/replay/sessions/${sessionId}`)
   }
 }

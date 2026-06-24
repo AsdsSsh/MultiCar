@@ -1,11 +1,11 @@
 <script setup>
-import { ref, watch, onBeforeUnmount } from 'vue'
+import { ref, watch, onBeforeUnmount, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../store/authStore.js'
 import { useSimulationStore } from '../store/simulationStore.js'
 import SimulationCanvas from '../components/SimulationCanvas.vue'
-
-const BASE = ''
+import CarStatusList from '../components/CarStatusList.vue'
+import { api } from '../utils/api.js'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -20,10 +20,12 @@ const playing = ref(false)
 const speed = ref(1)
 let timer = null
 
+const selectedSession = computed(() => sessions.value.find(s => s.sessionId === selectedId.value))
+
 async function loadSessions() {
   loading.value = true
   try {
-    const res = await fetch(BASE + '/api/replay/sessions').then(r => r.json())
+    const res = await api.listReplaySessions()
     sessions.value = res.sessions || []
   } catch (e) {
     sessions.value = []
@@ -36,8 +38,17 @@ async function selectSession(sid) {
   playing.value = false
   clearInterval(timer)
   selectedId.value = sid
+
+  // 清除旧仿真状态
+  store.cars = []
+  store.mapView = []
+  store.mapBlock = []
+  store.tick = 0
+  store.sessionId = null
+  store.isRunning = false
+
   try {
-    const res = await fetch(BASE + `/api/replay/sessions/${sid}`).then(r => r.json())
+    const res = await api.getReplaySession(sid)
     ticks.value = res.ticks || []
     currentIndex.value = 0
     if (ticks.value.length > 0) {
@@ -56,11 +67,7 @@ function seekTo(index) {
 }
 
 function togglePlay() {
-  if (playing.value) {
-    pause()
-  } else {
-    play()
-  }
+  playing.value ? pause() : play()
 }
 
 function play() {
@@ -87,20 +94,42 @@ function pause() {
   timer = null
 }
 
-watch(speed, () => {
-  if (playing.value) {
-    pause()
-    play()
+function stepForward() {
+  if (currentIndex.value < ticks.value.length - 1) {
+    currentIndex.value++
+    store.handleStateUpdate(ticks.value[currentIndex.value])
   }
+}
+
+function stepBackward() {
+  if (currentIndex.value > 0) {
+    currentIndex.value--
+    store.handleStateUpdate(ticks.value[currentIndex.value])
+  }
+}
+
+watch(speed, () => {
+  if (playing.value) { pause(); play() }
 })
 
-onBeforeUnmount(() => {
-  clearInterval(timer)
+onBeforeUnmount(() => { clearInterval(timer) })
+
+onMounted(() => {
+  store.cars = []
+  store.mapView = []
+  store.mapBlock = []
+  store.tick = 0
+  loadSessions()
 })
 
 function logout() {
   authStore.logout()
   router.push('/login')
+}
+
+function backToSim() {
+  pause()
+  router.push('/user')
 }
 
 function fmtTime(ts) {
@@ -115,76 +144,123 @@ function fmtTime(ts) {
         <h1>变电站巡检仿真系统</h1>
         <span class="tag">回放</span>
       </div>
-      <div class="user-area">
+      <div class="actions">
+        <button v-if="selectedId" class="btn" @click="selectedId = null">← 录制列表</button>
+        <button class="btn" @click="backToSim">仿真页面</button>
         <span class="user-name">{{ authStore.username }}</span>
-        <button class="btn" @click="router.push('/user')">仿真</button>
-        <button class="btn logout" @click="logout">退出</button>
+        <button class="btn logout" @click="logout">退出登录</button>
       </div>
     </header>
 
-    <div class="main">
-      <!-- 左侧：录制列表 -->
-      <aside class="sidebar">
-        <div class="sidebar-header">
-          <h3>录制列表</h3>
-          <button class="btn sm" @click="loadSessions">刷新</button>
+    <!-- 未选择录制：列表视图 -->
+    <div v-if="!selectedId" class="list-view">
+      <div class="list-header">
+        <h2>录制列表</h2>
+        <div class="list-header-actions">
+          <span class="count">{{ sessions.length }} 个录制</span>
+          <button class="btn" @click="loadSessions">刷新</button>
         </div>
-        <div v-if="loading" class="loading">加载中...</div>
-        <div v-else-if="sessions.length === 0" class="empty">暂无录制</div>
-        <div v-else class="session-list">
-          <div
-            v-for="s in sessions" :key="s.sessionId"
-            class="session-item"
-            :class="{ active: s.sessionId === selectedId }"
-            @click="selectSession(s.sessionId)"
-          >
-            <div class="session-id">{{ s.sessionId }}</div>
-            <div class="session-meta">
-              {{ s.tickCount }} ticks | {{ s.config.mapWidth || '?' }}x{{ s.config.mapHeight || '?' }}
+      </div>
+
+      <div v-if="loading" class="loading">加载中...</div>
+      <div v-else-if="sessions.length === 0" class="empty">
+        <div class="empty-icon">📼</div>
+        <div class="empty-text">暂无录制</div>
+        <div class="empty-hint">运行仿真后会自动生成录制</div>
+      </div>
+
+      <div v-else class="session-grid">
+        <div
+          v-for="s in sessions" :key="s.sessionId"
+          class="session-card"
+          @click="selectSession(s.sessionId)"
+        >
+          <div class="card-header">
+            <span class="session-id">{{ s.sessionId }}</span>
+            <span class="tick-badge">{{ s.tickCount }} ticks</span>
+          </div>
+          <div class="card-body">
+            <div class="stat">
+              <span class="stat-label">地图尺寸</span>
+              <span class="stat-val">{{ s.config.mapWidth || '?' }} × {{ s.config.mapHeight || '?' }}</span>
             </div>
-            <div class="session-time">{{ fmtTime(s.startTime) }}</div>
+            <div class="stat">
+              <span class="stat-label">小车数量</span>
+              <span class="stat-val">{{ s.config.carCount || '?' }} 辆</span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">录制时间</span>
+              <span class="stat-val">{{ fmtTime(s.startTime) }}</span>
+            </div>
           </div>
         </div>
-      </aside>
+      </div>
+    </div>
 
-      <!-- 右侧：回放区 -->
-      <section class="viewer">
-        <div v-if="!selectedId" class="placeholder">请从左侧选择一个录制</div>
-        <template v-else>
-          <div class="canvas-wrap">
-            <SimulationCanvas />
+    <!-- 已选择录制：仿真视图布局 -->
+    <div v-else class="main">
+      <main class="canvas-wrap">
+        <SimulationCanvas />
+      </main>
+
+      <aside class="panel">
+        <!-- 会话信息 -->
+        <section class="info-section" v-if="selectedSession">
+          <h3>录制：{{ selectedSession.sessionId }}</h3>
+          <div class="info-grid">
+            <div class="info-item">
+              <span>地图</span>
+              <b>{{ selectedSession.config.mapWidth || '?' }}×{{ selectedSession.config.mapHeight || '?' }}</b>
+            </div>
+            <div class="info-item">
+              <span>总 Tick</span>
+              <b>{{ ticks.length }}</b>
+            </div>
+            <div class="info-item">
+              <span>当前</span>
+              <b>{{ currentIndex + 1 }} / {{ ticks.length }}</b>
+            </div>
+            <div class="info-item">
+              <span>小车</span>
+              <b>{{ store.cars.length }} 辆</b>
+            </div>
           </div>
+        </section>
 
-          <!-- 控制栏 -->
-          <div class="controls">
-            <button class="btn ctrl-btn" @click="togglePlay">
+        <!-- 回放控制 -->
+        <section class="control-section">
+          <div class="control-row">
+            <button class="ctrl-btn" @click="stepBackward" :disabled="currentIndex <= 0">⏮</button>
+            <button class="ctrl-btn play-btn" @click="togglePlay">
               {{ playing ? '⏸ 暂停' : '▶ 播放' }}
             </button>
-
-            <div class="progress-wrap">
-              <span class="tick-label">{{ currentIndex + 1 }} / {{ ticks.length }}</span>
-              <input
-                type="range"
-                min="0"
-                :max="ticks.length - 1"
-                :value="currentIndex"
-                @input="seekTo(Number($event.target.value))"
-                class="slider"
-              />
-            </div>
-
-            <div class="speed-select">
-              <span class="speed-label">速度</span>
-              <select v-model.number="speed">
-                <option :value="0.5">0.5x</option>
-                <option :value="1">1x</option>
-                <option :value="2">2x</option>
-                <option :value="4">4x</option>
-              </select>
-            </div>
+            <button class="ctrl-btn" @click="stepForward" :disabled="currentIndex >= ticks.length - 1">⏭</button>
           </div>
-        </template>
-      </section>
+          <div class="progress-wrap">
+            <input
+              type="range"
+              min="0"
+              :max="ticks.length - 1"
+              :value="currentIndex"
+              @input="seekTo(Number($event.target.value))"
+              class="slider"
+            />
+          </div>
+          <div class="speed-row">
+            <span class="speed-label">速度</span>
+            <select v-model.number="speed" class="speed-select">
+              <option :value="0.5">0.5x</option>
+              <option :value="1">1x</option>
+              <option :value="2">2x</option>
+              <option :value="4">4x</option>
+              <option :value="8">8x</option>
+            </select>
+          </div>
+        </section>
+
+        <!-- 小车状态列表（只读） -->
+        <CarStatusList :cars="store.cars" readonly />
+      </aside>
     </div>
   </div>
 </template>
@@ -196,65 +272,106 @@ function fmtTime(ts) {
   flex-direction: column;
   background: #161616;
 }
+
+/* ===== 顶栏 ===== */
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
-  height: 52px; padding: 0 20px;
+  height: 52px; padding: 0 16px;
   background: #222; border-bottom: 1px solid #333; flex-shrink: 0;
 }
 .brand { display: flex; align-items: center; gap: 10px; }
 .brand h1 { font-size: 16px; color: #fff; }
 .tag { font-size: 11px; padding: 2px 8px; border-radius: 4px; background: rgba(129,199,132,0.2); color: #81c784; }
-.user-area { display: flex; align-items: center; gap: 12px; }
-.user-name { font-size: 13px; color: #aaa; }
+.actions { display: flex; align-items: center; gap: 10px; }
+.user-name { font-size: 12px; color: #888; }
 .btn {
   background: #3a3a3a; color: #eee; border: 1px solid #4a4a4a;
   border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer;
 }
 .btn:hover { background: #4a4a4a; }
-.btn.sm { padding: 4px 10px; font-size: 12px; }
 .btn.logout { color: #ff8a65; border-color: #ff8a65; background: transparent; }
-.main { flex: 1; display: flex; overflow: hidden; }
-.sidebar {
-  width: 260px; background: #1a1a1a; border-right: 1px solid #333;
-  display: flex; flex-direction: column; flex-shrink: 0;
+
+/* ===== 列表视图 ===== */
+.list-view {
+  flex: 1; overflow-y: auto; padding: 30px 40px;
 }
-.sidebar-header {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 14px 16px 10px;
+.list-header {
+  display: flex; align-items: center; gap: 14px; margin-bottom: 24px;
 }
-.sidebar-header h3 { font-size: 13px; color: #ccc; }
-.loading, .empty { text-align: center; color: #888; padding: 40px 0; font-size: 13px; }
-.session-list { flex: 1; overflow-y: auto; }
-.session-item {
-  padding: 12px 16px; cursor: pointer; border-bottom: 1px solid #2a2a2a; transition: background 0.15s;
+.list-header h2 { font-size: 20px; color: #fff; }
+.list-header-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+.count { font-size: 13px; color: #888; padding: 3px 10px; background: #262626; border-radius: 10px; }
+.loading { text-align: center; padding: 60px 0; color: #888; }
+.empty { text-align: center; padding: 80px 20px; }
+.empty-icon { font-size: 56px; margin-bottom: 16px; }
+.empty-text { font-size: 17px; color: #aaa; }
+.empty-hint { font-size: 13px; color: #666; margin-top: 8px; }
+
+.session-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
 }
-.session-item:hover { background: rgba(255,255,255,0.03); }
-.session-item.active { background: rgba(79,195,247,0.08); border-left: 3px solid #4fc3f7; }
-.session-id { font-size: 13px; color: #eee; font-family: monospace; margin-bottom: 4px; }
-.session-meta { font-size: 11px; color: #888; }
-.session-time { font-size: 10px; color: #555; margin-top: 2px; }
-.viewer { flex: 1; display: flex; flex-direction: column; }
-.placeholder { flex: 1; display: flex; align-items: center; justify-content: center; color: #666; font-size: 14px; }
+.session-card {
+  background: #1e1e1e; border: 1px solid #333; border-radius: 10px;
+  padding: 18px; cursor: pointer; transition: all 0.2s;
+}
+.session-card:hover {
+  border-color: #81c784; background: #222;
+  transform: translateY(-2px); box-shadow: 0 4px 16px rgba(129,199,132,0.1);
+}
+.card-header {
+  display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;
+}
+.session-id { font-size: 15px; font-weight: 600; color: #e8e8e8; font-family: monospace; }
+.tick-badge { font-size: 11px; padding: 2px 8px; border-radius: 4px; background: rgba(129,199,132,0.15); color: #81c784; }
+.card-body { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.stat { display: flex; flex-direction: column; gap: 2px; }
+.stat-label { font-size: 11px; color: #777; }
+.stat-val { font-size: 14px; color: #ddd; font-weight: 600; }
+
+/* ===== 仿真视图 ===== */
+.main {
+  flex: 1; display: flex; min-height: 0;
+}
 .canvas-wrap {
-  flex: 1; padding: 12px; display: flex; align-items: center; justify-content: center;
-  overflow: hidden;
+  flex: 1; min-width: 0; background: #1a1a1a; position: relative;
 }
-.controls {
-  height: 64px; background: #1e1e1e; border-top: 1px solid #333;
-  display: flex; align-items: center; padding: 0 20px; gap: 20px; flex-shrink: 0;
+.panel {
+  width: 320px; flex-shrink: 0; background: #1e1e1e;
+  border-left: 1px solid #333; overflow-y: auto;
+  padding: 16px; display: flex; flex-direction: column; gap: 16px;
 }
+
+/* 信息 */
+.info-section {
+  background: #262626; border-radius: 8px; padding: 14px 16px;
+}
+.info-section h3 { font-size: 13px; color: #81c784; margin-bottom: 10px; word-break: break-all; }
+.info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.info-item { display: flex; flex-direction: column; gap: 2px; }
+.info-item span { font-size: 11px; color: #888; }
+.info-item b { font-size: 13px; color: #eee; font-weight: 600; }
+
+/* 回放控制 */
+.control-section {
+  background: #262626; border-radius: 8px; padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.control-row { display: flex; gap: 8px; justify-content: center; }
 .ctrl-btn {
-  padding: 8px 20px; font-size: 14px; background: #4fc3f7; border-color: #4fc3f7;
-  color: #10242e; font-weight: 600; min-width: 90px;
+  padding: 8px 16px; background: #2a2a2a; color: #ccc;
+  border: none; border-radius: 6px; font-size: 14px; cursor: pointer; transition: all 0.15s;
 }
-.ctrl-btn:hover { background: #6fcef9; }
-.progress-wrap { flex: 1; display: flex; align-items: center; gap: 12px; }
-.tick-label { font-size: 12px; color: #aaa; min-width: 80px; text-align: right; font-family: monospace; }
-.slider { flex: 1; accent-color: #4fc3f7; height: 6px; }
-.speed-select { display: flex; align-items: center; gap: 8px; }
+.ctrl-btn:hover:not(:disabled) { filter: brightness(1.2); }
+.ctrl-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.play-btn { background: #43a047; color: #fff; font-weight: 600; min-width: 100px; }
+.progress-wrap { width: 100%; }
+.slider { width: 100%; accent-color: #81c784; height: 6px; cursor: pointer; }
+.speed-row { display: flex; align-items: center; gap: 8px; justify-content: center; }
 .speed-label { font-size: 12px; color: #888; }
-.speed-select select {
+.speed-select {
   background: #2a2a2a; border: 1px solid #444; border-radius: 6px;
-  color: #eee; padding: 4px 8px; font-size: 13px;
+  color: #eee; padding: 4px 8px; font-size: 13px; cursor: pointer;
 }
 </style>

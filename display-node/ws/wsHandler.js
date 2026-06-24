@@ -89,10 +89,18 @@ class WsHandler {
         const sessionId = msg.data && msg.data.sessionId;
         if (sessionId) {
           this.pushService.unsubscribeFromSession(ws, sessionId);
-          recorder.removeSession(sessionId);
+          recorder.stopRecording(sessionId);
           console.log(`[WS] session cleaned: ${sessionId}`);
         }
         // 继续转发 STOP 给 Controller 清理 Redis
+      }
+
+      // RESET: 结束当前录制
+      if (cmd === 'RESET') {
+        const sessionId = msg.data && msg.data.sessionId;
+        if (sessionId) {
+          recorder.stopRecording(sessionId);
+        }
       }
 
       // SET_CONFIG: 先切到新 session，取消旧订阅

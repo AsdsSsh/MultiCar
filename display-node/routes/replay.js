@@ -5,7 +5,8 @@ const recorder = require('../services/recorder');
 
 // GET /api/replay/sessions — 列出所有录制
 router.get('/sessions', (req, res) => {
-  res.json({ success: true, sessions: recorder.listSessions() });
+  const sessions = recorder.listSessions().filter(s => s.tickCount >= 2);
+  res.json({ success: true, sessions });
 });
 
 // GET /api/replay/sessions/:sessionId — 获取全部 tick
