@@ -14,6 +14,7 @@ const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
 const mapConfigRoutes = require('./routes/mapConfig');
 const replayRoutes = require('./routes/replay');
+const simulationRoutes = require('./routes/simulation');
 
 async function main() {
   const app = express();
@@ -41,6 +42,7 @@ async function main() {
   app.use('/api/admin', adminRoutes);
   app.use('/api/config', mapConfigRoutes);
   app.use('/api/replay', replayRoutes);
+app.use('/api/simulation', simulationRoutes);
 
   server.listen(config.server.port, () => {
     console.log('═════════════════════════════════════');

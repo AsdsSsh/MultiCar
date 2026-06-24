@@ -8,12 +8,14 @@ const DATA_DIR = path.join(__dirname, '..', 'data');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const REGISTRATIONS_FILE = path.join(DATA_DIR, 'registrations.json');
 const MAPS_FILE = path.join(DATA_DIR, 'maps.json');
+const SIMULATIONS_FILE = path.join(DATA_DIR, 'simulations.json');
 
 class JsonFileStore {
   constructor() {
     this.users = new Map();
     this.registrations = new Map();
     this.savedMaps = new Map();
+    this.simulations = new Map();
 
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -22,13 +24,14 @@ class JsonFileStore {
     this._loadUsers();
     this._loadRegistrations();
     this._loadMaps();
+    this._loadSimulations();
 
     if (this.users.size === 0) {
       this._createDefaultAdmin();
     }
 
     console.log(
-      `JsonFileStore 初始化完成：${this.users.size} 个用户，${this.registrations.size} 条注册请求，${this.savedMaps.size} 张地图`
+      `JsonFileStore 初始化完成：${this.users.size} 个用户，${this.registrations.size} 条注册请求，${this.savedMaps.size} 张地图，${this.simulations.size} 个仿真`
     );
   }
 
@@ -218,6 +221,54 @@ class JsonFileStore {
     return true;
   }
 
+  // ==================== 仿真管理 ====================
+
+  listSimulations() {
+    return Array.from(this.simulations.values()).map(sim => {
+      const map = this.savedMaps.get(sim.mapId);
+      return { ...sim, mapName: map ? map.name : '未知地图' };
+    });
+  }
+
+  getSimulation(id) {
+    const sim = this.simulations.get(id);
+    return sim ? { ...sim } : null;
+  }
+
+  createSimulation(name, mapId, createdBy) {
+    const id = uuidv4().substring(0, 8);
+    const sim = {
+      id,
+      name,
+      mapId,
+      sessionId: id,
+      status: 'inactive',
+      createdAt: Date.now(),
+      createdBy,
+    };
+    this.simulations.set(id, sim);
+    this._persistSimulations();
+    console.log(`创建仿真: ${name} (${id}), 创建者: ${createdBy}`);
+    return { ...sim };
+  }
+
+  updateSimulationStatus(id, status) {
+    const sim = this.simulations.get(id);
+    if (!sim) return false;
+    sim.status = status;
+    this._persistSimulations();
+    return true;
+  }
+
+  deleteSimulation(id) {
+    const removed = this.simulations.get(id);
+    if (!removed) return false;
+    this.simulations.delete(id);
+    this._persistSimulations();
+    console.log(`删除仿真: ${removed.name} (${id})`);
+    return true;
+  }
+
   // ==================== 内部方法 ====================
 
   _createDefaultAdmin() {
@@ -301,6 +352,28 @@ class JsonFileStore {
       fs.writeFileSync(MAPS_FILE, JSON.stringify(list, null, 2), 'utf8');
     } catch (e) {
       console.error('保存地图文件失败', e.message);
+    }
+  }
+
+  _loadSimulations() {
+    try {
+      if (fs.existsSync(SIMULATIONS_FILE)) {
+        const list = JSON.parse(fs.readFileSync(SIMULATIONS_FILE, 'utf8'));
+        for (const s of list) {
+          if (s.id) this.simulations.set(s.id, s);
+        }
+      }
+    } catch (e) {
+      console.error('加载仿真文件失败', e.message);
+    }
+  }
+
+  _persistSimulations() {
+    try {
+      const list = Array.from(this.simulations.values());
+      fs.writeFileSync(SIMULATIONS_FILE, JSON.stringify(list, null, 2), 'utf8');
+    } catch (e) {
+      console.error('保存仿真文件失败', e.message);
     }
   }
 }

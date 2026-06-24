@@ -47,6 +47,33 @@ class WsHandler {
         return;
       }
 
+      // JOIN_SESSION: 加入已有仿真（不重置，仅订阅）
+      if (cmd === 'JOIN_SESSION') {
+        const sessionId = msg.data && msg.data.sessionId;
+        if (sessionId) {
+          if (ws._sessions) {
+            ws._sessions.forEach(sid => this.pushService.unsubscribeFromSession(ws, sid));
+          }
+          ws._sessions = new Set([sessionId]);
+          this.pushService.subscribeToSession(ws, sessionId);
+          this.rabbitClient.subscribeSession(sessionId);
+          this.pushService.pushLatestState(sessionId);
+          console.log(`[WS] 用户 ${ws._user?.username} 加入 session ${sessionId}`);
+        }
+        return;
+      }
+
+      // LEAVE_SESSION: 离开仿真（不停仿真）
+      if (cmd === 'LEAVE_SESSION') {
+        const sessionId = msg.data && msg.data.sessionId;
+        if (sessionId) {
+          this.pushService.unsubscribeFromSession(ws, sessionId);
+          if (ws._sessions) ws._sessions.delete(sessionId);
+          console.log(`[WS] 用户 ${ws._user?.username} 离开 session ${sessionId}`);
+        }
+        return;
+      }
+
       const role = ws._user ? ws._user.role : null;
       const controlCmds = ['RESUME', 'PAUSE', 'STEP_ONCE', 'SET_CONFIG', 'SET_MAP_EDIT', 'RESET'];
 

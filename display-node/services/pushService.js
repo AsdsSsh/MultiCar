@@ -6,6 +6,7 @@ class PushService {
     this.reader = blackboardReader;
     this.sessions = new Map();
     this.recordedSessions = new Set();
+    this.lastTickPerSession = new Map();
   }
 
   addSession(ws) {
@@ -70,6 +71,8 @@ class PushService {
 
       const json = JSON.stringify(state);
 
+      this.lastTickPerSession.set(sessionId, tick);
+
       for (const [ws, sessionSet] of this.sessions.entries()) {
         if (ws.readyState === 1 && sessionSet.has(sessionId)) {
           try { ws.send(json); } catch (e) { }
@@ -89,6 +92,11 @@ class PushService {
     } catch (e) {
       console.error(`[PUSH] 组装 STATE_UPDATE 失败 (session ${sessionId}):`, e.message);
     }
+  }
+
+  async pushLatestState(sessionId) {
+    const tick = this.lastTickPerSession.get(sessionId) || 0;
+    await this.pushStateUpdate(tick, sessionId);
   }
 }
 

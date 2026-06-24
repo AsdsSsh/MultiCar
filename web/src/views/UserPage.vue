@@ -19,6 +19,16 @@ const savedMaps = ref([])
 const mapsLoading = ref(true)
 const selectedMap = ref(null)
 
+// ===== 仿真相关状态 =====
+const savedSimulations = ref([])
+const simulationsLoading = ref(true)
+const selectedSimulation = ref(null)
+
+// ===== 创建仿真弹窗 =====
+const showCreateDialog = ref(false)
+const createName = ref('')
+const createMapId = ref('')
+
 // ===== 增加小车弹窗 =====
 const showAddCarDialog = ref(false)
 const pickCarPosMode = ref(false)    // 进入点击地图选位置模式（增加小车）
@@ -33,8 +43,9 @@ const moveCarId = ref(null)         // 当前正在移动的小车ID
 // ===== WebSocket 连接 =====
 // 地图列表更新回调：当配置员保存新地图时自动刷新
 function onMapListUpdated() {
-  console.log('[UserPage] 收到 MAP_LIST_UPDATED，刷新地图列表')
+  console.log('[UserPage] 收到 MAP_LIST_UPDATED，刷新地图和仿真列表')
   loadSavedMaps()
+  loadSimulations()
 }
 
 const wsUrl = WS_URL + '?token=' + authStore.token
@@ -55,58 +66,139 @@ async function loadSavedMaps() {
   }
 }
 
+async function loadSimulations() {
+  simulationsLoading.value = true
+  try {
+    const res = await api.listSimulations()
+    savedSimulations.value = res.simulations || []
+  } catch (e) {
+    savedSimulations.value = []
+  } finally {
+    simulationsLoading.value = false
+  }
+}
+
 onMounted(() => {
   loadSavedMaps()
+  loadSimulations()
 })
 
-// ===== 选择地图开始探索 =====
-function selectMap(map) {
-  selectedMap.value = map
+// ===== 仿真管理 =====
+async function enterSimulation(sim) {
+  selectedSimulation.value = sim
 
-  // 先停旧 session，再生成新 sessionId
-  if (store.sessionId) sendCommand('STOP')
-  const sessionId = crypto.randomUUID ? crypto.randomUUID().substring(0, 8) : Date.now().toString(36)
-
-  const config = {
-    sessionId,
-    mapWidth: map.mapWidth || 40,
-    mapHeight: map.mapHeight || 30,
-    carCount: map.carPositions?.length || map.carCount || 5,
-    obstacleDensity: map.obstacleDensity || 0,
-    algorithm: map.algorithm || 'A_STAR',
-    customObstacles: map.obstacles || [],
-    carPositions: map.carPositions || []
+  // 加载关联地图信息用于显示
+  try {
+    const mapRes = await api.getMap(sim.mapId)
+    selectedMap.value = mapRes.config || mapRes
+  } catch (e) {
+    selectedMap.value = { name: '未知地图', mapWidth: 40, mapHeight: 30, algorithm: 'A_STAR', carPositions: [], obstacles: [] }
   }
 
-  // 清除旧地图数据，避免新地图加载前显示残留
+  const sessionId = sim.sessionId
+
+  // 清除旧数据
   store.cars = []
   store.mapView = []
   store.mapBlock = []
   store.tick = 0
 
-  store.config = {
-    ...store.config,
-    mapWidth: config.mapWidth,
-    mapHeight: config.mapHeight,
-    carCount: config.carCount,
-    obstacleDensity: config.obstacleDensity,
-    algorithm: config.algorithm
-  }
-  store.sessionId = sessionId
+  // 获取仿真最新状态
+  let detail = sim
+  try {
+    const detailRes = await api.getSimulation(sim.id)
+    detail = detailRes.simulation
+  } catch (e) { /* 使用本地数据 */ }
 
-  sendCommand(COMMANDS.SET_CONFIG, config)
+  if (detail.status === 'inactive') {
+    // 首次激活：发送 SET_CONFIG 初始化
+    const config = {
+      sessionId,
+      mapWidth: selectedMap.value.mapWidth || 40,
+      mapHeight: selectedMap.value.mapHeight || 30,
+      carCount: selectedMap.value.carPositions?.length || selectedMap.value.carCount || 5,
+      obstacleDensity: selectedMap.value.obstacleDensity || 0,
+      algorithm: selectedMap.value.algorithm || 'A_STAR',
+      customObstacles: selectedMap.value.obstacles || [],
+      carPositions: selectedMap.value.carPositions || []
+    }
+
+    store.config = {
+      ...store.config,
+      mapWidth: config.mapWidth,
+      mapHeight: config.mapHeight,
+      carCount: config.carCount,
+      obstacleDensity: config.obstacleDensity,
+      algorithm: config.algorithm
+    }
+    store.sessionId = sessionId
+
+    sendCommand(COMMANDS.SET_CONFIG, config)
+    api.startSimulation(sim.id).catch(() => {})
+  } else {
+    // 仿真已在运行，直接加入
+    store.config = {
+      ...store.config,
+      mapWidth: selectedMap.value.mapWidth || 40,
+      mapHeight: selectedMap.value.mapHeight || 30
+    }
+    store.sessionId = sessionId
+    sendCommand(COMMANDS.JOIN_SESSION, { sessionId })
+  }
+
   store.setRunning(false)
   viewMode.value = 'simulation'
-  loadSavedMaps()
 }
 
-// ===== 返回地图列表 =====
-function backToList() {
-  // 先停止仿真
-  sendCommand('STOP')
+function exitSimulation() {
+  // 仅退订，不停止仿真
+  if (store.sessionId) {
+    sendCommand(COMMANDS.LEAVE_SESSION, { sessionId: store.sessionId })
+  }
   store.setRunning(false)
   viewMode.value = 'list'
+  selectedSimulation.value = null
   selectedMap.value = null
+}
+
+// ===== 创建仿真弹窗 =====
+function openCreateDialog() {
+  createName.value = ''
+  createMapId.value = ''
+  showCreateDialog.value = true
+}
+
+async function confirmCreateSimulation() {
+  if (!createName.value.trim()) {
+    alert('请输入仿真名称')
+    return
+  }
+  if (!createMapId.value) {
+    alert('请选择地图')
+    return
+  }
+  try {
+    await api.createSimulation(createName.value.trim(), createMapId.value)
+    showCreateDialog.value = false
+    loadSimulations()
+  } catch (e) {
+    alert('创建失败: ' + e.message)
+  }
+}
+
+function cancelCreateSimulation() {
+  showCreateDialog.value = false
+}
+
+// ===== 删除仿真 =====
+async function onDeleteSimulation(simId) {
+  if (!window.confirm('确定要删除此仿真吗？')) return
+  try {
+    await api.deleteSimulation(simId)
+    loadSimulations()
+  } catch (e) {
+    alert('删除失败: ' + e.message)
+  }
 }
 
 // ===== 控制命令 =====
@@ -128,6 +220,9 @@ function onReset() {
   if (window.confirm('确定要重置仿真吗？')) {
     sendCommand(COMMANDS.RESET)
     store.setRunning(false)
+    if (selectedSimulation.value) {
+      api.stopSimulation(selectedSimulation.value.id).catch(() => {})
+    }
   }
 }
 
@@ -264,59 +359,114 @@ function formatTime(ts) {
         </span>
       </div>
       <div class="actions">
-        <button v-if="viewMode === 'simulation'" class="btn" @click="backToList">← 返回地图列表</button>
+        <button v-if="viewMode === 'simulation'" class="btn" @click="exitSimulation">← 返回仿真列表</button>
         <span class="user-name">{{ authStore.username }}</span>
         <button class="btn logout" @click="logout">退出登录</button>
       </div>
     </header>
 
-    <!-- 地图列表视图 -->
+    <!-- 列表视图：仿真 + 地图 -->
     <div v-if="viewMode === 'list'" class="list-view">
-      <div class="list-header">
-        <h2>选择地图开始探索</h2>
-        <span class="map-count">共 {{ savedMaps.length }} 张地图</span>
+      <!-- 仿真列表 -->
+      <div class="list-section">
+        <div class="list-header">
+          <h2>我的仿真</h2>
+          <div class="list-header-actions">
+            <span class="count">{{ savedSimulations.length }} 个仿真</span>
+            <button class="btn create-btn" @click="openCreateDialog">＋ 创建仿真</button>
+          </div>
+        </div>
+
+        <div v-if="simulationsLoading" class="loading">加载仿真列表...</div>
+
+        <div v-else-if="savedSimulations.length === 0" class="empty">
+          <div class="empty-icon">🎮</div>
+          <div class="empty-text">暂无仿真</div>
+          <div class="empty-hint">点击"创建仿真"按钮，选择地图来创建新的仿真</div>
+        </div>
+
+        <div v-else class="sim-grid">
+          <div
+            v-for="sim in savedSimulations"
+            :key="sim.id"
+            class="sim-card"
+            @click="enterSimulation(sim)"
+          >
+            <div class="sim-card-header">
+              <span class="sim-name">{{ sim.name }}</span>
+              <span class="sim-status" :class="sim.status">
+                {{ sim.status === 'inactive' ? '未启动' : sim.status === 'running' ? '运行中' : '已暂停' }}
+              </span>
+            </div>
+            <div class="sim-card-body">
+              <div class="map-stat">
+                <span class="stat-label">参考地图</span>
+                <span class="stat-val">{{ sim.mapName }}</span>
+              </div>
+              <div class="map-stat">
+                <span class="stat-label">创建者</span>
+                <span class="stat-val">{{ sim.createdBy }}</span>
+              </div>
+              <div class="map-stat">
+                <span class="stat-label">创建时间</span>
+                <span class="stat-val">{{ formatTime(sim.createdAt) }}</span>
+              </div>
+            </div>
+            <div class="sim-card-footer">
+              <span class="enter-hint">点击进入仿真 →</span>
+              <button class="btn-delete" @click.stop="onDeleteSimulation(sim.id)" title="删除仿真">🗑</button>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <div v-if="mapsLoading" class="loading">加载地图列表...</div>
+      <!-- 地图列表（只读） -->
+      <div class="list-section maps-section">
+        <div class="list-header">
+          <h2>可用地图</h2>
+          <span class="count">{{ savedMaps.length }} 张</span>
+        </div>
 
-      <div v-else-if="savedMaps.length === 0" class="empty">
-        <div class="empty-icon">🗺️</div>
-        <div class="empty-text">暂无可用地图</div>
-        <div class="empty-hint">请联系配置员创建地图后刷新页面</div>
-      </div>
+        <div v-if="mapsLoading" class="loading">加载地图列表...</div>
 
-      <div v-else class="map-grid">
-        <div
-          v-for="map in savedMaps"
-          :key="map.id"
-          class="map-card"
-          @click="selectMap(map)"
-        >
-          <div class="map-card-header">
-            <span class="map-name">{{ map.name }}</span>
-            <span class="map-algo">{{ ALGORITHMS.find(a => a.value === map.algorithm)?.label || map.algorithm || 'A*' }}</span>
-          </div>
-          <div class="map-card-body">
-            <div class="map-stat">
-              <span class="stat-label">地图尺寸</span>
-              <span class="stat-val">{{ map.mapWidth }} × {{ map.mapHeight }}</span>
+        <div v-else-if="savedMaps.length === 0" class="empty">
+          <div class="empty-icon">🗺️</div>
+          <div class="empty-text">暂无可用地图</div>
+          <div class="empty-hint">请联系配置员创建地图后刷新页面</div>
+        </div>
+
+        <div v-else class="map-grid">
+          <div
+            v-for="map in savedMaps"
+            :key="map.id"
+            class="map-card map-card-readonly"
+          >
+            <div class="map-card-header">
+              <span class="map-name">{{ map.name }}</span>
+              <span class="map-algo">{{ ALGORITHMS.find(a => a.value === map.algorithm)?.label || map.algorithm || 'A*' }}</span>
             </div>
-            <div class="map-stat">
-              <span class="stat-label">小车数量</span>
-              <span class="stat-val">{{ map.carPositions?.length || map.carCount || 0 }} 辆</span>
+            <div class="map-card-body">
+              <div class="map-stat">
+                <span class="stat-label">地图尺寸</span>
+                <span class="stat-val">{{ map.mapWidth }} × {{ map.mapHeight }}</span>
+              </div>
+              <div class="map-stat">
+                <span class="stat-label">小车数量</span>
+                <span class="stat-val">{{ map.carPositions?.length || map.carCount || 0 }} 辆</span>
+              </div>
+              <div class="map-stat">
+                <span class="stat-label">障碍物</span>
+                <span class="stat-val">{{ map.obstacles?.length || 0 }} 个</span>
+              </div>
+              <div class="map-stat">
+                <span class="stat-label">障碍密度</span>
+                <span class="stat-val">{{ Math.round((map.obstacleDensity || 0) * 100) }}%</span>
+              </div>
             </div>
-            <div class="map-stat">
-              <span class="stat-label">障碍物</span>
-              <span class="stat-val">{{ map.obstacles?.length || 0 }} 个</span>
+            <div class="map-card-footer">
+              <span class="map-created-at" v-if="map.createdAt">{{ formatTime(map.createdAt) }}</span>
+              <span class="map-creator" v-if="map.createdBy">创建者: {{ map.createdBy }}</span>
             </div>
-            <div class="map-stat">
-              <span class="stat-label">障碍密度</span>
-              <span class="stat-val">{{ Math.round((map.obstacleDensity || 0) * 100) }}%</span>
-            </div>
-          </div>
-          <div class="map-card-footer">
-            <span class="map-created-at" v-if="map.createdAt">{{ formatTime(map.createdAt) }}</span>
-            <span class="map-creator" v-if="map.createdBy">创建者: {{ map.createdBy }}</span>
           </div>
         </div>
       </div>
@@ -335,8 +485,9 @@ function formatTime(ts) {
 
       <aside class="panel">
         <!-- 当前地图信息 -->
-        <section class="info-section" v-if="selectedMap">
-          <h3>当前地图：{{ selectedMap.name }}</h3>
+        <section class="info-section" v-if="selectedSimulation">
+          <h3>仿真：{{ selectedSimulation.name }}</h3>
+          <p class="info-map-name" v-if="selectedMap">地图：{{ selectedMap.name }}</p>
           <div class="info-grid">
             <div class="info-item">
               <span>尺寸</span>
@@ -462,6 +613,45 @@ function formatTime(ts) {
               : pickedPos ? `在 (${pickedPos.x}, ${pickedPos.y}) 添加`
               : '请先点击地图选择位置' }}
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 创建仿真弹窗 -->
+    <div v-if="showCreateDialog" class="dialog-overlay" @click.self="cancelCreateSimulation">
+      <div class="dialog-card">
+        <div class="dialog-header">
+          <h3>＋ 创建仿真</h3>
+          <button class="dialog-close" @click="cancelCreateSimulation">✕</button>
+        </div>
+        <div class="dialog-body">
+          <div class="form-group">
+            <label>仿真名称</label>
+            <input
+              v-model="createName"
+              class="form-input"
+              placeholder="输入仿真名称"
+              maxlength="50"
+              @keyup.enter="confirmCreateSimulation"
+            />
+          </div>
+          <div class="form-group">
+            <label>选择地图</label>
+            <select v-model="createMapId" class="form-select">
+              <option value="" disabled>请选择地图</option>
+              <option v-for="map in savedMaps" :key="map.id" :value="map.id">
+                {{ map.name }}
+              </option>
+            </select>
+          </div>
+        </div>
+        <div class="dialog-footer">
+          <button class="dlg-btn cancel" @click="cancelCreateSimulation">取消</button>
+          <button
+            class="dlg-btn confirm"
+            :disabled="!createName.trim() || !createMapId"
+            @click="confirmCreateSimulation"
+          >创建仿真</button>
         </div>
       </div>
     </div>
@@ -936,4 +1126,181 @@ function formatTime(ts) {
   color: #fff;
 }
 .dlg-btn.confirm:hover { background: #f57c00; }
+
+/* ===== 列表视图布局 ===== */
+.list-section {
+  margin-bottom: 32px;
+}
+.list-section.maps-section {
+  border-top: 1px solid #333;
+  padding-top: 28px;
+}
+.list-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+.count {
+  font-size: 13px;
+  color: #888;
+  padding: 3px 10px;
+  background: #262626;
+  border-radius: 10px;
+}
+.create-btn {
+  background: #43a047;
+  color: #fff;
+  border-color: #43a047;
+  font-weight: 600;
+}
+.create-btn:hover {
+  background: #388e3c;
+  border-color: #388e3c;
+}
+
+/* ===== 仿真卡片 ===== */
+.sim-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+.sim-card {
+  background: #1e1e1e;
+  border: 1px solid #333;
+  border-radius: 10px;
+  padding: 18px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.sim-card:hover {
+  border-color: #ff9800;
+  background: #222;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(255,152,0,0.1);
+}
+.sim-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.sim-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: #e8e8e8;
+}
+.sim-status {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.sim-status.inactive {
+  background: rgba(158,158,158,0.15);
+  color: #9e9e9e;
+}
+.sim-status.running {
+  background: rgba(129,199,132,0.15);
+  color: #81c784;
+}
+.sim-status.paused {
+  background: rgba(255,152,0,0.15);
+  color: #ff9800;
+}
+.sim-card-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.sim-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #555;
+  padding-top: 10px;
+  border-top: 1px solid #2a2a2a;
+}
+.enter-hint {
+  color: #ff9800;
+  font-size: 12px;
+}
+.btn-delete {
+  background: none;
+  border: 1px solid transparent;
+  color: #888;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+.btn-delete:hover {
+  background: rgba(229,115,115,0.15);
+  border-color: #e57373;
+  color: #e57373;
+}
+
+/* ===== 只读地图卡片 ===== */
+.map-card-readonly {
+  cursor: default;
+}
+.map-card-readonly:hover {
+  border-color: #333;
+  background: #1e1e1e;
+  transform: none;
+  box-shadow: none;
+}
+
+/* ===== 仿真视图 ===== */
+.info-map-name {
+  font-size: 11px;
+  color: #888;
+  margin: 0 0 4px 0;
+}
+
+/* ===== 创建仿真弹窗表单 ===== */
+.form-group {
+  margin-bottom: 16px;
+}
+.form-group label {
+  display: block;
+  font-size: 13px;
+  color: #aaa;
+  margin-bottom: 6px;
+}
+.form-input {
+  width: 100%;
+  padding: 10px 12px;
+  background: #1a1a1a;
+  border: 1px solid #444;
+  border-radius: 6px;
+  color: #eee;
+  font-size: 13px;
+  outline: none;
+  box-sizing: border-box;
+}
+.form-input:focus {
+  border-color: #ff9800;
+}
+.form-select {
+  width: 100%;
+  padding: 10px 12px;
+  background: #1a1a1a;
+  border: 1px solid #444;
+  border-radius: 6px;
+  color: #eee;
+  font-size: 13px;
+  outline: none;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+.form-select:focus {
+  border-color: #ff9800;
+}
+.form-select option {
+  background: #1e1e1e;
+  color: #eee;
+}
 </style>

@@ -29,7 +29,9 @@ export const COMMANDS = {
   STEP_ONCE: 'STEP_ONCE',
   ADD_CAR: 'ADD_CAR',
   DELETE_CAR: 'DELETE_CAR',
-  MOVE_CAR: 'MOVE_CAR'
+  MOVE_CAR: 'MOVE_CAR',
+  JOIN_SESSION: 'JOIN_SESSION',
+  LEAVE_SESSION: 'LEAVE_SESSION'
 }
 
 /** WebSocket 服务端推送消息类型 */

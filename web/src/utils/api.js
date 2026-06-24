@@ -127,5 +127,39 @@ export const api = {
 
   getMapConfig() {
     return request('/api/config/get')
+  },
+
+  // 仿真管理
+  listSimulations() {
+    return request('/api/simulation/list')
+  },
+
+  createSimulation(name, mapId) {
+    return request('/api/simulation/create', {
+      method: 'POST',
+      body: JSON.stringify({ name, mapId })
+    })
+  },
+
+  getSimulation(id) {
+    return request(`/api/simulation/${id}`)
+  },
+
+  startSimulation(id) {
+    return request(`/api/simulation/${id}/start`, {
+      method: 'POST'
+    })
+  },
+
+  stopSimulation(id) {
+    return request(`/api/simulation/${id}/stop`, {
+      method: 'POST'
+    })
+  },
+
+  deleteSimulation(id) {
+    return request(`/api/simulation/${id}`, {
+      method: 'DELETE'
+    })
   }
 }
