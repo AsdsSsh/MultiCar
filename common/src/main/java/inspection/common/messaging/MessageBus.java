@@ -79,19 +79,14 @@ public class MessageBus {
         logger.debug("绑定队列 {} 到交换器 {}", queueName, exchangeName);
     }
 
-    /** 声明共享队列并清空旧消息 */
+    /** 声明共享队列（所有 session 共用，只需声明一次） */
     public void declareSharedQueues() throws IOException {
-        declareAndPurge("ControllerCmd");
-        declareAndPurge(Constants.QUEUE_NAVIGATOR_CMD);
-        declareAndPurge(Constants.QUEUE_TARGET_PLANNER_CMD);
-        declareAndPurge(Constants.QUEUE_TASK_CONFIG_CMD);
-        declareAndPurge(Constants.QUEUE_CAR_POOL);
-        logger.info("共享队列声明完成（已清空旧消息）");
-    }
-
-    private void declareAndPurge(String queueName) throws IOException {
-        channel.queueDeclare(queueName, true, false, false, null);
-        channel.queuePurge(queueName);
+        declareQueue("ControllerCmd");
+        declareQueue(Constants.QUEUE_NAVIGATOR_CMD);
+        declareQueue(Constants.QUEUE_TARGET_PLANNER_CMD);
+        declareQueue(Constants.QUEUE_TASK_CONFIG_CMD);
+        declareQueue(Constants.QUEUE_CAR_POOL);
+        logger.info("共享队列声明完成");
     }
 
     /** 声明指定 session 的队列（Fanout + 刷新队列 + CarPool 队列） */

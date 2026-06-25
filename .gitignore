@@ -4,6 +4,8 @@ data/
 # Maven
 target/
 
+*.jar
+
 # Vite / Node
 web/node_modules/
 web/dist/

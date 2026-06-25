@@ -51,8 +51,11 @@ public class TargetPlannerAgent implements AutoCloseable {
         long tick = data.getLongValue("tick", 0);
 
         if (sessionId == null || sessionId.isEmpty()) {
-            log.warn("[TargetPlanner] Missing sessionId, skip");
-            notifyController(sessionId, Collections.emptyList());
+            return;
+        }
+
+        // 快速丢弃无效 session 的消息（避免处理旧 session 的堆积消息）
+        if (!blackboard.isTaskActive(sessionId)) {
             return;
         }
 

@@ -57,8 +57,9 @@ public class NavigatorAgent implements AutoCloseable {
         RouteAlgorithm algorithm = RouteAlgorithm.valueOf(algoStr);
 
         if (sessionId == null || sessionId.isEmpty()) {
-            log.warn("[Navigator] Missing sessionId, skip");
-            notifyController(null, carId, false, 0);
+            return;
+        }
+        if (!blackboard.isTaskActive(sessionId)) {
             return;
         }
 
