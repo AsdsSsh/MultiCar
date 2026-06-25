@@ -11,21 +11,19 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeoutException;
 
 import static inspection.common.util.Constants.*;
 
 /**
- * CarPool — 单队列 + 懒加载，按需创建 CarAgent。
+ * CarPool — 无状态模式，每次 TICK_MOVE 创建临时 CarAgent 处理。
+ * 支持多实例部署：多个 CarPool 订阅同一队列，MQ 轮询分发。
  * 用法：java inspection.car.CarPoolMain
  */
 public class CarPoolMain {
 
     private static final Logger log = LoggerFactory.getLogger(CarPoolMain.class);
 
-    private final Map<String, CarAgent> agents = new ConcurrentHashMap<>();
     private final BlackboardClient blackboard;
     private final MessageBus messageBus;
     private final DistributedLock distributedLock;
@@ -46,14 +44,13 @@ public class CarPoolMain {
         messageBus.subscribe(QUEUE_CAR_POOL, this::handleMessage);
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            log.info("CarPool shutting down ({} agents)...", agents.size());
-            agents.values().forEach(CarAgent::stop);
+            log.info("CarPool shutting down...");
             messageBus.close();
             blackboard.close();
             log.info("CarPool stopped.");
         }));
 
-        log.info("CarPool ready, listening on '{}' (lazy mode)", QUEUE_CAR_POOL);
+        log.info("CarPool ready (stateless), listening on '{}'", QUEUE_CAR_POOL);
 
         while (true) {
             try { Thread.sleep(60000); } catch (InterruptedException e) { break; }
@@ -66,15 +63,8 @@ public class CarPoolMain {
         String carId = data.getString("carId");
         if (carId == null) return;
 
-        CarAgent agent = agents.computeIfAbsent(carId, id -> {
-            CarAgent a = new CarAgent(id, blackboard, messageBus, distributedLock);
-            a.start();
-            log.info("CarPool: lazily created {}", id);
-            return a;
-        });
-
-        // 直接调 handleMessage，carId 已在 data 中
-        agent.handleMessage(cmd, data, timestamp);
+        new CarAgent(carId, blackboard, messageBus, distributedLock)
+                .handleMessage(cmd, data, timestamp);
     }
 
     public static void main(String[] args) {

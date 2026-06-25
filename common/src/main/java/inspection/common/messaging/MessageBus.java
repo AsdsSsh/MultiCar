@@ -86,7 +86,7 @@ public class MessageBus {
         logger.info("共享队列声明完成");
     }
 
-    /** 声明指定 session 的队列（Fanout + 刷新队列 + 小车队列） */
+    /** 声明指定 session 的队列（Fanout + 刷新队列 + CarPool 队列） */
     public void declareSessionQueues(String sessionId, int carCount) throws IOException {
         String fanoutExchange = Constants.getSessionFanoutExchange(sessionId);
         String refreshQueue = Constants.getSessionRefreshQueue(sessionId);
@@ -169,6 +169,7 @@ public class MessageBus {
                     }
                 };
 
+                consumerChannel.basicQos(1); // 每次只取一条，多消费者时公平轮询
                 consumerChannel.basicConsume(queueName, true, deliverCallback, tag -> {});
                 logger.info("开始订阅队列: {}", queueName);
 
@@ -207,6 +208,7 @@ public class MessageBus {
                     }
                 };
 
+                consumerChannel.basicQos(1);
                 consumerChannel.basicConsume(queueName, true, deliverCallback, tag -> {});
                 logger.info("开始订阅交换器: {}, 队列: {}", exchangeName, queueName);
 

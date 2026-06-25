@@ -217,7 +217,7 @@ BlackBoxAI/
 | `NavigatorCmd` | NavigatorAgent | PLAN_ROUTE |
 | `TargetPlannerCmd` | TargetPlannerAgent | ASSIGN_TARGET, RESET_BATCH |
 | `TaskConfigCmd` | TaskConfiguratorAgent | FORWARD_CONFIG, FORWARD_RESET |
-| `CarPool` | CarPoolMain | TICK_MOVE |
+| `CarPool` | CarPoolMain (无状态，支持多实例) | TICK_MOVE |
 
 ### 每 Session 动态队列
 
@@ -225,6 +225,14 @@ BlackBoxAI/
 |------|------|------|
 | `UpdateView_{sessionId}` | Fanout Exchange | 广播 REFRESH_ALL |
 | `WSB_Refresh_{sessionId}` | Queue (绑定到 Fanout) | display-node 消费，触发 STATE_UPDATE 推送 |
+
+### 消息分发
+
+`MessageBus.subscribe()` 和 `subscribeFanout()` 均设置 `basicQos(1)`，每个消费者一次只预取一条消息。多实例订阅同一队列时，RabbitMQ 在实例间公平轮询分发。
+
+### CarPool 无状态模式
+
+CarPool 不再缓存 CarAgent。每次收到 `TICK_MOVE` 创建临时 `CarAgent` 处理，处理完后丢弃。所有小车状态存储在 Redis，由分布式锁保证互斥。详见 [多实例部署指南](multi-instance-deployment.md)。
 
 ## 7. 完整仿真生命周期
 

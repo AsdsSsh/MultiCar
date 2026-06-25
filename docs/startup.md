@@ -60,13 +60,9 @@ java -cp "common/target/common-1.0-SNAPSHOT.jar;navigator/target/navigator-1.0-S
 java -cp "common/target/common-1.0-SNAPSHOT.jar;target-planner/target/target-planner-1.0-SNAPSHOT.jar;%USERPROFILE%\.m2\repository\redis\clients\jedis\5.0.2\jedis-5.0.2.jar;%USERPROFILE%\.m2\repository\com\rabbitmq\amqp-client\5.18.0\amqp-client-5.18.0.jar;%USERPROFILE%\.m2\repository\com\alibaba\fastjson2\fastjson2\2.0.47\fastjson2-2.0.47.jar;%USERPROFILE%\.m2\repository\org\slf4j\slf4j-api\2.0.9\slf4j-api-2.0.9.jar;%USERPROFILE%\.m2\repository\ch\qos\logback\logback-classic\1.5.6\logback-classic-1.5.6.jar;%USERPROFILE%\.m2\repository\ch\qos\logback\logback-core\1.5.6\logback-core-1.5.6.jar;%USERPROFILE%\.m2\repository\org\apache\commons\commons-pool2\2.12.0\commons-pool2-2.12.0.jar" inspection.targetplanner.TargetPlannerMain
 ```
 
-### 5. CarPool（小车池，单进程承载所有小车）
+### 5. CarPool（小车池，无状态模式，支持多实例）
 ```bash
-# 默认 5 辆，可选参数指定数量
-java -cp "common/target/common-1.0-SNAPSHOT.jar;car/target/car-1.0-SNAPSHOT.jar;%USERPROFILE%\.m2\repository\redis\clients\jedis\5.0.2\jedis-5.0.2.jar;%USERPROFILE%\.m2\repository\com\rabbitmq\amqp-client\5.18.0\amqp-client-5.18.0.jar;%USERPROFILE%\.m2\repository\com\alibaba\fastjson2\fastjson2\2.0.47\fastjson2-2.0.47.jar;%USERPROFILE%\.m2\repository\org\slf4j\slf4j-api\2.0.9\slf4j-api-2.0.9.jar;%USERPROFILE%\.m2\repository\ch\qos\logback\logback-classic\1.5.6\logback-classic-1.5.6.jar;%USERPROFILE%\.m2\repository\ch\qos\logback\logback-core\1.5.6\logback-core-1.5.6.jar;%USERPROFILE%\.m2\repository\org\apache\commons\commons-pool2\2.12.0\commons-pool2-2.12.0.jar" inspection.car.CarPoolMain 5
-
-# 如需单车独立进程（调试），仍可使用：
-# java -cp "..." inspection.car.CarMain Car001
+java -cp "common/target/common-1.0-SNAPSHOT.jar;car/target/car-1.0-SNAPSHOT.jar;%USERPROFILE%\.m2\repository\redis\clients\jedis\5.0.2\jedis-5.0.2.jar;%USERPROFILE%\.m2\repository\com\rabbitmq\amqp-client\5.18.0\amqp-client-5.18.0.jar;%USERPROFILE%\.m2\repository\com\alibaba\fastjson2\fastjson2\2.0.47\fastjson2-2.0.47.jar;%USERPROFILE%\.m2\repository\org\slf4j\slf4j-api\2.0.9\slf4j-api-2.0.9.jar;%USERPROFILE%\.m2\repository\ch\qos\logback\logback-classic\1.5.6\logback-classic-1.5.6.jar;%USERPROFILE%\.m2\repository\ch\qos\logback\logback-core\1.5.6\logback-core-1.5.6.jar;%USERPROFILE%\.m2\repository\org\apache\commons\commons-pool2\2.12.0\commons-pool2-2.12.0.jar" inspection.car.CarPoolMain
 ```
 
 ---

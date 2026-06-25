@@ -111,3 +111,39 @@ Web浏览器 → WSB → ControllerCmd → Controller → TaskConfigCmd → Task
                                                         ↓
                                               开始节拍循环调度
 ```
+
+## 分布式架构
+
+系统基于**黑板架构**，各组件通过 RabbitMQ + Redis 解耦协作，支持跨机器部署。
+
+### 组件部署形态
+
+| 组件 | 多实例 | 说明 |
+|------|--------|------|
+| Controller | 单实例 | 集中式节拍调度器，维护 Session 状态 |
+| Navigator | 多实例 | 无状态路径规划，MQ 轮询分发 |
+| TargetPlanner | 单实例 | 内存中维护批分配缓存 |
+| CarPool | 多实例 | 无状态模式，每次 TICK_MOVE 创建临时 CarAgent |
+| Car (独立模式) | 多实例 | 每辆小车独立进程，独立 MQ 队列 |
+| TaskConfigurator | 多实例 | 无状态，处理一次性初始化命令 |
+
+### 通信机制
+
+| 机制 | 中间件 | 用途 |
+|------|--------|------|
+| 消息队列 | RabbitMQ | 进程间异步命令 |
+| 共享状态 | Redis | 黑板存储，所有进程读写 |
+| 分布式锁 | Redis (SET NX PX + Lua) | 小车粒度的互斥访问 |
+| WebSocket | ws (Node.js) | 实时推送状态到浏览器 |
+| HTTP REST | Express | 前端 API 调用 |
+
+### 配置方式
+
+通过环境变量覆盖默认配置（优先级：环境变量 > 系统属性 > config.properties）：
+
+- `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD`
+- `MQ_HOST` / `MQ_PORT` / `MQ_USERNAME` / `MQ_PASSWORD` / `MQ_VHOST`
+
+### 多实例部署
+
+详见 [docs/multi-instance-deployment.md](docs/multi-instance-deployment.md)

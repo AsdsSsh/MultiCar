@@ -83,10 +83,6 @@ public final class Constants {
     public static final String CMD_DELETE_CAR = "DELETE_CAR";
     public static final String CMD_MOVE_CAR = "MOVE_CAR";
 
-    /** 小车队列（所有 session 共用，通过消息中的 sessionId 区分） */
-    public static String getCarQueueName(String carId) {
-        return "Car_" + carId;
-    }
 
     // ===== Redis Key（带 session 前缀） =====
     public static final String REDIS_KEY_LOCK_PREFIX = "lock:";
