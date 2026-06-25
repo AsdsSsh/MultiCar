@@ -1,5 +1,4 @@
 // POST /api/auth/login, /api/auth/register, GET /api/auth/whoami
-// 与 Java AuthController 完全一致
 const express = require('express');
 const router = express.Router();
 const store = require('../store/jsonFileStore');
@@ -10,20 +9,14 @@ function ok(data) {
   return { success: true, ...data };
 }
 
-function error(message, status) {
-  const err = new Error(message);
-  err.status = status || 400;
-  return err;
-}
-
 // POST /api/auth/login
-router.post('/login', (req, res) => {
+router.post('/login', async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password || !username.trim() || !password.trim()) {
     return res.status(400).json({ success: false, message: '用户名和密码不能为空' });
   }
 
-  const user = store.findByUsername(username);
+  const user = await store.findByUsername(username);
   if (!user) {
     return res.status(401).json({ success: false, message: '用户名或密码错误' });
   }
@@ -40,7 +33,7 @@ router.post('/login', (req, res) => {
 });
 
 // POST /api/auth/register
-router.post('/register', (req, res) => {
+router.post('/register', async (req, res) => {
   const { username, password, confirmPassword, role } = req.body || {};
 
   if (!username || !username.trim()) {
@@ -63,7 +56,7 @@ router.post('/register', (req, res) => {
   }
 
   try {
-    store.createRegistration(username, password, role);
+    await store.createRegistration(username, password, role);
     res.json(ok({ message: '注册请求已提交，请等待管理员审批' }));
   } catch (e) {
     res.status(409).json({ success: false, message: e.message });
@@ -71,7 +64,7 @@ router.post('/register', (req, res) => {
 });
 
 // GET /api/auth/whoami
-router.get('/whoami', (req, res) => {
+router.get('/whoami', async (req, res) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ success: false, message: '未登录' });
@@ -82,7 +75,7 @@ router.get('/whoami', (req, res) => {
     return res.status(401).json({ success: false, message: '登录已过期，请重新登录' });
   }
 
-  const user = store.findByUsername(payload.sub);
+  const user = await store.findByUsername(payload.sub);
   if (!user) {
     return res.status(401).json({ success: false, message: '用户不存在' });
   }

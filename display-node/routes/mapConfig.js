@@ -1,18 +1,18 @@
-// 地图配置路由 — 与 Java MapConfigController 完全一致
+// 地图配置路由
 const express = require('express');
 const router = express.Router();
 const store = require('../store/jsonFileStore');
 const { requireConfigurator } = require('../auth/middleware');
 
 // GET /api/config/list — 无需认证
-router.get('/list', (req, res) => {
-  const maps = store.listMaps();
+router.get('/list', async (req, res) => {
+  const maps = await store.listMaps();
   res.json({ success: true, maps });
 });
 
 // GET /api/config/get — 返回首个地图或默认配置，无需认证
-router.get('/get', (req, res) => {
-  const maps = store.listMaps();
+router.get('/get', async (req, res) => {
+  const maps = await store.listMaps();
   if (maps.length > 0) {
     res.json({ success: true, config: maps[0] });
   } else {
@@ -25,8 +25,8 @@ router.get('/get', (req, res) => {
 });
 
 // GET /api/config/get/:mapId — 无需认证
-router.get('/get/:mapId', (req, res) => {
-  const map = store.getMap(req.params.mapId);
+router.get('/get/:mapId', async (req, res) => {
+  const map = await store.getMap(req.params.mapId);
   if (map) {
     res.json({ success: true, config: map });
   } else {
@@ -38,13 +38,12 @@ router.get('/get/:mapId', (req, res) => {
 router.use(requireConfigurator);
 
 // POST /api/config/save
-router.post('/save', (req, res) => {
+router.post('/save', async (req, res) => {
   const { name, ...data } = req.body || {};
   const mapName = (name && name.trim()) ? name.trim() : '未命名地图_' + (Date.now() % 100000);
-  const saved = store.saveMap(mapName, data, req.user.username);
+  const saved = await store.saveMap(mapName, data, req.user.username);
   console.log(`配置员 ${req.user.username} 保存了地图: ${mapName}`);
 
-  // 广播地图列表更新
   const pushService = req.app.get('pushService');
   if (pushService) pushService.broadcastMapUpdated();
 
@@ -52,8 +51,8 @@ router.post('/save', (req, res) => {
 });
 
 // PUT /api/config/:mapId
-router.put('/:mapId', (req, res) => {
-  const ok = store.updateMap(req.params.mapId, req.body || {});
+router.put('/:mapId', async (req, res) => {
+  const ok = await store.updateMap(req.params.mapId, req.body || {});
   if (ok) {
     const pushService = req.app.get('pushService');
     if (pushService) pushService.broadcastMapUpdated();
@@ -64,8 +63,8 @@ router.put('/:mapId', (req, res) => {
 });
 
 // DELETE /api/config/:mapId
-router.delete('/:mapId', (req, res) => {
-  const ok = store.deleteMap(req.params.mapId);
+router.delete('/:mapId', async (req, res) => {
+  const ok = await store.deleteMap(req.params.mapId);
   if (ok) {
     const pushService = req.app.get('pushService');
     if (pushService) pushService.broadcastMapUpdated();

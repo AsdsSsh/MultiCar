@@ -10,13 +10,13 @@ router.use((req, res, next) => {
 });
 
 // GET /api/simulation/list
-router.get('/list', (req, res) => {
-  const simulations = store.listSimulations();
+router.get('/list', async (req, res) => {
+  const simulations = await store.listSimulations();
   res.json({ success: true, simulations });
 });
 
 // POST /api/simulation/create
-router.post('/create', (req, res) => {
+router.post('/create', async (req, res) => {
   const { name, mapId } = req.body || {};
   if (!name || !name.trim()) {
     return res.status(400).json({ success: false, message: '仿真名称不能为空' });
@@ -24,45 +24,45 @@ router.post('/create', (req, res) => {
   if (!mapId) {
     return res.status(400).json({ success: false, message: '请选择地图' });
   }
-  const map = store.getMap(mapId);
+  const map = await store.getMap(mapId);
   if (!map) {
     return res.status(404).json({ success: false, message: '地图不存在' });
   }
-  const simulation = store.createSimulation(name.trim(), mapId, req.user.username);
+  const simulation = await store.createSimulation(name.trim(), mapId, req.user.username);
   const ps = req.app.get('pushService');
   if (ps) ps.broadcastSimulationUpdated();
   res.json({ success: true, simulation });
 });
 
 // GET /api/simulation/:id
-router.get('/:id', (req, res) => {
-  const sim = store.getSimulation(req.params.id);
+router.get('/:id', async (req, res) => {
+  const sim = await store.getSimulation(req.params.id);
   if (!sim) return res.status(404).json({ success: false, message: '仿真不存在' });
   res.json({ success: true, simulation: sim });
 });
 
 // POST /api/simulation/:id/start
-router.post('/:id/start', (req, res) => {
-  const ok = store.updateSimulationStatus(req.params.id, 'running');
+router.post('/:id/start', async (req, res) => {
+  const ok = await store.updateSimulationStatus(req.params.id, 'running');
   if (!ok) return res.status(404).json({ success: false, message: '仿真不存在' });
   res.json({ success: true, message: '仿真已启动' });
 });
 
 // POST /api/simulation/:id/stop
-router.post('/:id/stop', (req, res) => {
-  const ok = store.updateSimulationStatus(req.params.id, 'inactive');
+router.post('/:id/stop', async (req, res) => {
+  const ok = await store.updateSimulationStatus(req.params.id, 'inactive');
   if (!ok) return res.status(404).json({ success: false, message: '仿真不存在' });
   res.json({ success: true, message: '仿真已停止' });
 });
 
 // DELETE /api/simulation/:id
-router.delete('/:id', (req, res) => {
-  const sim = store.getSimulation(req.params.id);
+router.delete('/:id', async (req, res) => {
+  const sim = await store.getSimulation(req.params.id);
   if (!sim) return res.status(404).json({ success: false, message: '仿真不存在' });
   if (sim.createdBy !== req.user.username && req.user.role !== 'ADMIN') {
     return res.status(403).json({ success: false, message: '无权删除此仿真' });
   }
-  store.deleteSimulation(req.params.id);
+  await store.deleteSimulation(req.params.id);
   const ps = req.app.get('pushService');
   if (ps) ps.broadcastSimulationUpdated();
   res.json({ success: true, message: '仿真已删除' });
