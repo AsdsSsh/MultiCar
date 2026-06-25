@@ -164,6 +164,7 @@ public class ControllerAgent {
         double explored = blackboard.getExploredPercent(sid, mapWidth, mapHeight);
         if (explored >= EXPLORATION_COMPLETE_THRESHOLD) {
             log.info("Session {} exploration complete! Rate: {}%", sid, String.format("%.1f", explored));
+            broadcastViewUpdateFinished(session, explored);
             session.running = false;
             stopSessionTick(session);
             sessions.remove(sid);
@@ -493,6 +494,15 @@ public class ControllerAgent {
         data.put("carId", carId);
         data.put("tick", sessions.get(sessionId) != null ? sessions.get(sessionId).tickCount.get() : 0);
         messageBus.publish(QUEUE_CAR_POOL, CMD_TICK_MOVE, data);
+    }
+
+    private void broadcastViewUpdateFinished(SessionState session, double explored) {
+        JSONObject data = new JSONObject();
+        data.put("sessionId", session.sessionId);
+        data.put("tick", session.tickCount.get());
+        data.put("finished", true);
+        data.put("explored", Math.round(explored * 10.0) / 10.0);
+        messageBus.fanoutPublish(getSessionFanoutExchange(session.sessionId), CMD_REFRESH_ALL, data);
     }
 
     private void broadcastViewUpdate(SessionState session) {

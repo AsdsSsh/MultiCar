@@ -13,21 +13,48 @@ import {
 } from '../utils/canvasDrawer.js'
 import { COLORS } from '../utils/constants.js'
 
-// ============================================================
-// Canvas 渲染循环（requestAnimationFrame 驱动 + 脏标记重绘）
-// 对应方案设计文档「五、Canvas渲染设计 5.3 渲染策略」
-// ============================================================
+const ANIM_DURATION_MS = 500 // 匹配 tick 间隔，消除停顿
+
 export function useCanvasRenderer(canvasRef, store) {
   let ctx = null
   let rafId = null
   let dirty = true
   let geo = { cellSize: 0, offsetX: 0, offsetY: 0 }
 
+  // 动画状态
+  let prevCars = new Map()
+  let animStart = 0
+  let animating = false
+
   function markDirty() {
     dirty = true
   }
 
-  /** 根据父容器尺寸 + DPR 调整画布物理像素 */
+  function startCarAnimation() {
+    for (const c of store.cars) {
+      prevCars.set(c.carId, { x: c.x, y: c.y })
+    }
+    animStart = performance.now()
+    animating = true
+    dirty = true
+  }
+
+  function getInterpolatedCars() {
+    const elapsed = animating ? performance.now() - animStart : ANIM_DURATION_MS
+    const t = Math.min(elapsed / ANIM_DURATION_MS, 1.0)
+    const eased = 1 - (1 - t) * (1 - t)
+
+    return store.cars.map(c => {
+      const prev = prevCars.get(c.carId)
+      if (!prev || eased >= 1) return c
+      return {
+        ...c,
+        x: prev.x + (c.x - prev.x) * eased,
+        y: prev.y + (c.y - prev.y) * eased,
+      }
+    })
+  }
+
   function resize() {
     const canvas = canvasRef.value
     if (!canvas || !ctx) return
@@ -43,13 +70,11 @@ export function useCanvasRenderer(canvasRef, store) {
     dirty = true
   }
 
-  /** 全量重绘（按图层顺序 1~8） */
   function draw() {
     const canvas = canvasRef.value
     if (!canvas || !ctx) return
     const cssW = canvas.clientWidth
     const cssH = canvas.clientHeight
-    // 编辑模式下用编辑地图尺寸
     const mapW = store.editMode ? store.editMapWidth : store.config.mapWidth
     const mapH = store.editMode ? store.editMapHeight : store.config.mapHeight
     geo = computeGeometry(cssW, cssH, mapW, mapH)
@@ -59,20 +84,11 @@ export function useCanvasRenderer(canvasRef, store) {
     if (!geo.cellSize) return
 
     if (store.editMode) {
-      // ===== 编辑模式渲染 =====
-      // 画网格
       drawGrid(ctx, mapW, mapH, geo)
-
-      // 画小车保护区（淡色标记）
       drawEditProtectedZones(ctx, geo)
-
-      // 画编辑障碍物
       drawEditObstacles(ctx, geo)
-
-      // 画编辑小车位置
       drawEditCars(ctx, geo)
     } else {
-      // ===== 正常仿真渲染 =====
       if (store.mapView.length) drawExploration(ctx, store.mapView, geo)
       drawGrid(ctx, mapW, mapH, geo)
       if (store.mapBlock.length) {
@@ -81,7 +97,8 @@ export function useCanvasRenderer(canvasRef, store) {
       }
       drawRoutes(ctx, store.cars, geo)
       drawTargets(ctx, store.cars, geo)
-      drawCars(ctx, store.cars, geo, store.activeCarId)
+      const cars = getInterpolatedCars()
+      drawCars(ctx, cars, geo, store.activeCarId)
     }
 
     if (store.hoveredCell) {
@@ -94,9 +111,6 @@ export function useCanvasRenderer(canvasRef, store) {
     }
   }
 
-  // ===== 编辑模式绘制函数 =====
-
-  /** 绘制编辑障碍物 */
   function drawEditObstacles(ctx, geo) {
     const { cellSize } = geo
     for (const p of store.editObstacles) {
@@ -107,7 +121,6 @@ export function useCanvasRenderer(canvasRef, store) {
     }
   }
 
-  /** 绘制小车保护区（小车周围3x3区域用淡色标记） */
   function drawEditProtectedZones(ctx, geo) {
     const { cellSize } = geo
     const cells = store.editProtectedCells
@@ -120,15 +133,12 @@ export function useCanvasRenderer(canvasRef, store) {
     }
   }
 
-  /** 绘制编辑模式的小车位置 */
   function drawEditCars(ctx, geo) {
     const r = Math.max(3, geo.cellSize * 0.38)
     store.editCarPositions.forEach((car, i) => {
       const cx = geo.offsetX + car.x * geo.cellSize + geo.cellSize / 2
       const cy = geo.offsetY + car.y * geo.cellSize + geo.cellSize / 2
       const color = ['#4fc3f7', '#ff8a65', '#81c784', '#ffd54f', '#ba68c8'][i % 5]
-
-      // 联动高亮环（选中状态）
       if (store.activeCarId === car.carId) {
         ctx.beginPath()
         ctx.arc(cx, cy, r + 3, 0, Math.PI * 2)
@@ -136,8 +146,6 @@ export function useCanvasRenderer(canvasRef, store) {
         ctx.lineWidth = 2
         ctx.stroke()
       }
-
-      // 车身
       ctx.beginPath()
       ctx.arc(cx, cy, r, 0, Math.PI * 2)
       ctx.fillStyle = color
@@ -145,20 +153,16 @@ export function useCanvasRenderer(canvasRef, store) {
       ctx.strokeStyle = '#000'
       ctx.lineWidth = 1
       ctx.stroke()
-
-      // 序号（从carId中提取编号确保与右侧列表一致）
       if (geo.cellSize >= 14) {
         ctx.fillStyle = '#1a1a1a'
         ctx.font = `bold ${Math.floor(r)}px sans-serif`
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
-        const num = extractCarNumber(car.carId)
-        ctx.fillText(String(num), cx, cy)
+        ctx.fillText(String(extractCarNumber(car.carId)), cx, cy)
       }
     })
   }
 
-  /** 编辑模式下的 HUD 提示 */
   function drawEditHUD(ctx, cell, geo) {
     const info = store.editCellInfo(cell.x, cell.y)
     let statusText = '空地'
@@ -166,9 +170,7 @@ export function useCanvasRenderer(canvasRef, store) {
     if (info.car) statusText = `小车: ${info.car.carId}`
     const isProtected = store.editProtectedCells.has(cell.x + ',' + cell.y)
     if (isProtected && !info.car) statusText += ' (保护区)'
-
     const lines = [`(${cell.x}, ${cell.y})`, statusText]
-
     ctx.font = '12px sans-serif'
     ctx.textAlign = 'left'
     ctx.textBaseline = 'top'
@@ -176,14 +178,12 @@ export function useCanvasRenderer(canvasRef, store) {
     const lineH = 16
     const w = Math.max(...lines.map((t) => ctx.measureText(t).width)) + padding * 2
     const h = lines.length * lineH + padding * 2
-
     let { px, py } = cellPixel(cell.x, cell.y, geo)
     px += geo.cellSize + 8
     const maxX = ctx.canvas.clientWidth || ctx.canvas.width
     const maxY = ctx.canvas.clientHeight || ctx.canvas.height
     if (px + w > maxX) px = maxX - w - 4
     if (py + h > maxY) py = maxY - h - 4
-
     ctx.fillStyle = 'rgba(0, 0, 0, 0.75)'
     ctx.fillRect(px, py, w, h)
     ctx.fillStyle = '#ffffff'
@@ -196,19 +196,22 @@ export function useCanvasRenderer(canvasRef, store) {
 
   function loop() {
     rafId = requestAnimationFrame(loop)
-    if (!dirty) return
-    dirty = false
-    draw()
+    if (animating && performance.now() - animStart < ANIM_DURATION_MS) {
+      draw()
+    } else {
+      if (animating) { animating = false; prevCars.clear() }
+      if (!dirty) return
+      dirty = false
+      draw()
+    }
   }
 
-  /** 将鼠标客户端坐标换算为格点坐标，越界返回 null */
   function pixelToCell(clientX, clientY) {
     const canvas = canvasRef.value
     if (!canvas || !geo.cellSize) return null
     const rect = canvas.getBoundingClientRect()
     const x = Math.floor((clientX - rect.left - geo.offsetX) / geo.cellSize)
     const y = Math.floor((clientY - rect.top - geo.offsetY) / geo.cellSize)
-    // 编辑模式下用编辑地图尺寸做边界检查
     const mapW = store.editMode ? store.editMapWidth : store.config.mapWidth
     const mapH = store.editMode ? store.editMapHeight : store.config.mapHeight
     if (x < 0 || y < 0 || x >= mapW || y >= mapH) return null
@@ -227,19 +230,18 @@ export function useCanvasRenderer(canvasRef, store) {
     window.removeEventListener('resize', resize)
   })
 
-  // 数据 / 节拍 / 悬停 / 联动 变化时标脏，下一帧重绘
   watch(() => store.tick, markDirty)
   watch(() => store.mapView, markDirty)
   watch(() => store.mapBlock, markDirty)
   watch(() => store.hoveredCell, markDirty)
   watch(() => store.activeCarId, markDirty)
-  watch(() => store.cars, markDirty, { deep: true })
   watch(() => [store.config.mapWidth, store.config.mapHeight], markDirty)
-  // 编辑模式变化
   watch(() => store.editMode, markDirty)
   watch(() => store.editTool, markDirty)
   watch(() => store.editObstacles, markDirty, { deep: true })
   watch(() => store.editCarPositions, markDirty, { deep: true })
+
+  watch(() => store.cars, startCarAnimation, { deep: true })
 
   return { pixelToCell, markDirty }
 }

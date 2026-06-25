@@ -71,10 +71,12 @@ class BlackboardReader {
       const prefix = this._k(sessionId, '');
 
       const posStr = await this.redis.get(prefix + carId + ':Position');
-      if (posStr && posStr.startsWith('{')) {
-        try { const pos = JSON.parse(posStr); car.x = pos.x || 0; car.y = pos.y || 0; } catch (e) { }
+      if (!posStr) continue; // 已删除的小车，跳过
+      if (posStr.startsWith('{')) {
+        try { const pos = JSON.parse(posStr); car.x = pos.x || 0; car.y = pos.y || 0; } catch (e) { continue; }
+      } else {
+        continue;
       }
-      if (car.x === undefined) { car.x = 0; car.y = 0; }
 
       car.status = (await this.redis.get(prefix + carId + ':Status')) || 'IDLE';
 

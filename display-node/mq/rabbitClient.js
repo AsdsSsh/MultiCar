@@ -73,9 +73,11 @@ class RabbitClient {
       try {
         const body = JSON.parse(msg.content.toString());
         if (body.cmd === 'REFRESH_ALL') {
-          const tick = (body.data && body.data.tick) ? body.data.tick : 0;
+          const d = body.data || {};
+          const tick = d.tick || 0;
+          const finished = d.finished || false;
           if (this.pushService) {
-            this.pushService.pushStateUpdate(tick, sessionId);
+            this.pushService.pushStateUpdate(tick, sessionId, finished);
           }
         }
       } catch (e) {

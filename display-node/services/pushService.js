@@ -57,13 +57,13 @@ class PushService {
     }
   }
 
-  async pushStateUpdate(tick, sessionId) {
+  async pushStateUpdate(tick, sessionId, finished) {
     try {
       let subCount = 0;
       for (const [, sessionSet] of this.sessions.entries()) {
         if (sessionSet.has(sessionId)) subCount++;
       }
-      console.log(`[PUSH] pushStateUpdate tick=${tick} session=${sessionId} subscribers=${subCount}`);
+      console.log(`[PUSH] pushStateUpdate tick=${tick} session=${sessionId} subscribers=${subCount}${finished ? ' FINISHED' : ''}`);
       const config = await this.reader.readTaskConfig(sessionId);
       const w = config.mapWidth || 40;
       const h = config.mapHeight || 30;
@@ -73,6 +73,7 @@ class PushService {
         type: 'STATE_UPDATE',
         sessionId,
         tick,
+        finished: !!finished,
         running: !(await this.reader.isPaused(sessionId)),
         controllerId: controllerId || null,
         config,
@@ -110,6 +111,11 @@ class PushService {
         this.recordedSessions.add(sessionId);
       }
       recorder.recordTick(sessionId, json);
+      if (finished) {
+        recorder.stopRecording(sessionId);
+        this.recordedSessions.delete(sessionId);
+        console.log(`[PUSH] Session ${sessionId} 录制已停止`);
+      }
     } catch (e) {
       console.error(`[PUSH] 组装 STATE_UPDATE 失败 (session ${sessionId}):`, e.message);
     }

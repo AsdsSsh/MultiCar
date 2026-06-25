@@ -326,6 +326,7 @@ function cancelAddCar() {
 function onDeleteCar(carId) {
   if (!window.confirm(`确认删除小车 ${carId} 吗？此操作仅在运行时生效，不影响地图原始配置。`)) return
   sendCommand(COMMANDS.DELETE_CAR, { carId })
+  store.cars = store.cars.filter(c => c.carId !== carId)
 }
 
 // ===== 移动小车（进入点击地图选位置模式） =====
@@ -490,6 +491,10 @@ function formatTime(ts) {
 
     <!-- 仿真视图 -->
     <div v-if="viewMode === 'simulation'" class="main">
+      <!-- 探索完成横幅 -->
+      <div v-if="!store.isRunning && store.tick > 0" class="finished-banner">
+        ✅ 探索完成！覆盖率已达 99.9%，仿真已自动结束。小车共行走了 {{ store.tick }} 个节拍。
+      </div>
       <main class="canvas-wrap">
         <SimulationCanvas :pickMode="pickCarPosMode || moveCarMode" @cell-pick="onCellPicked" />
         <!-- 移动小车提示条 -->
@@ -1318,5 +1323,16 @@ function formatTime(ts) {
 .form-select option {
   background: #1e1e1e;
   color: #eee;
+}
+.finished-banner {
+  background: linear-gradient(135deg, rgba(76, 175, 80, 0.2), rgba(129, 199, 132, 0.15));
+  border: 1px solid #4caf50;
+  color: #a5d6a7;
+  padding: 12px 20px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 8px;
+  margin: 8px 12px 0;
 }
 </style>

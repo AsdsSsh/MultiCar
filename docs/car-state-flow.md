@@ -76,8 +76,8 @@ Controller tick (每个 session 独立线程，每 500ms)
       │                   │
       │            new CarAgent(carId)
       │            加分布式锁 peek 下一步
-      │            pop + setCarPosition (Redis)
-      │            illuminateArea (视野 3×3)
+      │            pop + SET NX 抢占目标格点（防碰撞）
+      │            setCarPosition + illuminateArea (Redis)
       │            检查障碍 → 正常/受阻
       │                   │
       │◄── MOVED / BLOCKED / ROUTE_DONE ─┘
@@ -158,6 +158,7 @@ Controller 保持同步 `subscribe`（维护 in-memory 状态）。`publish`/`fa
 |------|------|------|
 | 分布式锁 | Redis `SET NX PX` + Lua 解锁 | 移动执行、路径写入时互斥 |
 | 目标抢占 | Redis `SET NX EX`（仅 1-2 次 / 车） | TargetPlanner 原子分配目标 |
+| 防碰撞   | Redis `SET NX EX 5` 抢占目标格点 | 两车同时走向同一格时先到先得 |
 | 服务心跳 | Redis `SET key EX 5` | 服务发现，每 2s 心跳 |
 | Session 隔离 | MQ 队列 + Redis key 前缀 | 多仿真并行，互不干扰 |
 | 多实例负载 | MQ 轮询 + 线程池并发 | 水平扩展，跨机器分担 |

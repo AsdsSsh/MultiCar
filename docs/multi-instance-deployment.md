@@ -9,7 +9,7 @@
 | **Controller** | 多实例 | SET_CONFIG 抢占订阅 `ControllerCmd_{sid}`，session 绑定到实例 |
 | **Navigator** | 多实例 | 无状态 + 4 线程并发 + MQ 轮询 + 分布式锁 |
 | **TargetPlanner** | 多实例 | tick 携带在消息中，Redis `SET NX` 按 `{session}:{tick}:{x},{y}` 隔离 |
-| **CarPool** | 多实例 | 无状态 + 4 线程并发 + MQ 轮询 + 分布式锁 |
+| **CarPool** | 多实例 | 无状态 + 4 线程并发 + MQ 轮询 + 分布式锁 + 格点抢占防碰撞 |
 | **TaskConfigurator** | 多实例 | 无状态，操作幂等 |
 | **display-node** | 多实例 | 状态全在 Redis，MQ 智能路由 |
 

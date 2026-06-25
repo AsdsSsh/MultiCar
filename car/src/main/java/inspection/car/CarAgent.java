@@ -8,6 +8,10 @@ import inspection.common.model.CarStatus;
 import inspection.common.model.Point;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import redis.clients.jedis.Jedis;
+import redis.clients.jedis.params.SetParams;
+
+import java.util.Map;
 
 import static inspection.common.util.Constants.*;
 
@@ -89,6 +93,17 @@ public class CarAgent {
             return;
         }
 
+        // 原子抢占目标格点，防止两车同时走向同一格
+        if (!claimCell(sessionId, currentTick, popped)) {
+            log.warn("Car {} cell ({},{}) already claimed in session {}", carId, popped.getX(), popped.getY(), sessionId);
+            blackboard.clearCarRouteList(sessionId, carId);
+            blackboard.clearCarTarget(sessionId, carId);
+            blackboard.setCarStatus(sessionId, carId, CarStatus.BLOCKED);
+            blackboard.setCarBlockedTick(sessionId, carId, currentTick);
+            notifyController(sessionId, CMD_BLOCKED, popped);
+            return;
+        }
+
         blackboard.setCarPosition(sessionId, carId, popped.getX(), popped.getY());
         blackboard.illuminateArea(sessionId, popped.getX(), popped.getY(), mapWidth, mapHeight);
 
@@ -160,6 +175,15 @@ public class CarAgent {
             data.put("y", position.getY());
         }
         messageBus.replyToController(sessionId, cmd, data);
+    }
+
+    private boolean claimCell(String sessionId, long tick, Point cell) {
+        String key = "moveClaim:" + sessionId + ":" + tick + ":" + cell.getX() + "," + cell.getY();
+        try (Jedis jedis = blackboard.getJedisPool().getResource()) {
+            return "OK".equals(jedis.set(key, carId, SetParams.setParams().nx().ex(5)));
+        } catch (Exception e) {
+            return true; // Redis 不可用时放行，避免全部阻塞
+        }
     }
 
     public String getCarId() { return carId; }
