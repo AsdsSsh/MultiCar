@@ -18,13 +18,11 @@ public class TargetPlannerAgent implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(TargetPlannerAgent.class);
     private static final int CLAIM_TTL_SEC = 30;
+    private static final int CONCURRENCY = 4;
 
     private final BlackboardClient blackboard;
     private final MessageBus messageBus;
     private volatile boolean running = false;
-
-    /** 当前批次的 tick，用于构造 claim key 前缀 */
-    private volatile long currentTick = 0;
 
     public TargetPlannerAgent(BlackboardClient blackboard, MessageBus messageBus) {
         this.blackboard = blackboard;
@@ -32,18 +30,16 @@ public class TargetPlannerAgent implements AutoCloseable {
     }
 
     public void start() throws IOException {
-        log.info("=== TargetPlanner starting (multi-instance, Redis claims) ===");
+        log.info("=== TargetPlanner starting (multi-instance, concurrent) ===");
         messageBus.declareKnowledgeSourceInput(Constants.QUEUE_TARGET_PLANNER_CMD);
 
-        messageBus.subscribe(Constants.QUEUE_TARGET_PLANNER_CMD, (cmd, data, timestamp) -> {
+        messageBus.subscribeConcurrent(Constants.QUEUE_TARGET_PLANNER_CMD, (cmd, data, timestamp) -> {
             if (MessageType.ASSIGN_TARGET.equals(cmd)) {
                 handleAssignTarget(data);
             } else if (MessageType.RESET_BATCH.equals(cmd)) {
-                if (data != null) {
-                    currentTick = data.getLongValue("tick", 0);
-                }
+                // tick 已在 ASSIGN_TARGET 中携带，RESET_BATCH 保留兼容
             }
-        });
+        }, CONCURRENCY);
 
         running = true;
         log.info("TargetPlanner ready");
@@ -52,6 +48,7 @@ public class TargetPlannerAgent implements AutoCloseable {
     private void handleAssignTarget(JSONObject data) {
         String sessionId = data.getString("sessionId");
         String carId = data.getString("carId");
+        long tick = data.getLongValue("tick", 0);
 
         if (sessionId == null || sessionId.isEmpty()) {
             log.warn("[TargetPlanner] Missing sessionId, skip");
@@ -59,7 +56,7 @@ public class TargetPlannerAgent implements AutoCloseable {
             return;
         }
 
-        log.info("[TargetPlanner] ASSIGN_TARGET session={} car={}", sessionId, carId);
+        log.info("[TargetPlanner] ASSIGN_TARGET session={} car={} tick={}", sessionId, carId, tick);
 
         int mapWidth = blackboard.getMapWidth(sessionId);
         int mapHeight = blackboard.getMapHeight(sessionId);
@@ -80,32 +77,29 @@ public class TargetPlannerAgent implements AutoCloseable {
             return;
         }
 
-        int remaining = candidates.size();
+        // 按距离排序候选点（纯本地计算，不访问 Redis）
+        List<Point> sorted = new ArrayList<>(candidates);
+        sorted.sort(Comparator.comparingInt(p -> carPos.manhattanDistance(p)));
+
+        String claimPrefix = "targetClaim:" + sessionId + ":" + tick + ":";
+        int minDist = candidates.size() > 1 ? Constants.MIN_TARGET_DISTANCE : 0;
+
         Point bestTarget = null;
-        int bestDist = Integer.MAX_VALUE;
-
-        // claim key 前缀：targetClaim:{sessionId}:{tick}:
-        String claimPrefix = "targetClaim:" + sessionId + ":" + currentTick + ":";
-
-        for (Point candidate : candidates) {
+        for (Point candidate : sorted) {
+            if (carPos.manhattanDistance(candidate) < minDist) continue;
             String claimKey = claimPrefix + candidate.getX() + "," + candidate.getY();
-
-            // 用 Redis SET NX 原子抢占，成功则获得分配权
-            if (!tryClaim(claimKey, carId)) continue;
-
-            int dist = carPos.manhattanDistance(candidate);
-            if (remaining > 1 && dist < Constants.MIN_TARGET_DISTANCE) continue;
-
-            if (dist < bestDist) {
-                bestDist = dist;
+            // 只对第一个距离足够的候选做 SET NX，失败则试下一个
+            if (tryClaim(claimKey, carId)) {
                 bestTarget = candidate;
+                break;
             }
         }
 
         if (bestTarget != null) {
             blackboard.setCarTarget(sessionId, carId, bestTarget);
+            int dist = carPos.manhattanDistance(bestTarget);
             log.info("[TargetPlanner] {}:{} → target ({},{}) distance={}",
-                    sessionId, carId, bestTarget.getX(), bestTarget.getY(), bestDist);
+                    sessionId, carId, bestTarget.getX(), bestTarget.getY(), dist);
 
             List<Assignment> assignments = new ArrayList<>();
             assignments.add(new Assignment(carId, bestTarget.getX(), bestTarget.getY()));

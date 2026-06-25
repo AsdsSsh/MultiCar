@@ -46,7 +46,7 @@ public class CarPoolMain {
         HeartbeatService heartbeat = new HeartbeatService(bbConfig, "carpool");
         heartbeat.start();
 
-        messageBus.subscribe(QUEUE_CAR_POOL, this::handleMessage);
+        messageBus.subscribeConcurrent(QUEUE_CAR_POOL, this::handleMessage, 4);
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             log.info("CarPool shutting down...");

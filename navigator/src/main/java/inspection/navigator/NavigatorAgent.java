@@ -39,11 +39,11 @@ public class NavigatorAgent implements AutoCloseable {
         log.info("=== Navigator starting ===");
         messageBus.declareKnowledgeSourceInput(Constants.QUEUE_NAVIGATOR_CMD);
 
-        messageBus.subscribe(Constants.QUEUE_NAVIGATOR_CMD, (cmd, data, timestamp) -> {
+        messageBus.subscribeConcurrent(Constants.QUEUE_NAVIGATOR_CMD, (cmd, data, timestamp) -> {
             if (MessageType.PLAN_ROUTE.equals(cmd)) {
                 handlePlanRoute(data);
             }
-        });
+        }, 4);
 
         running = true;
         log.info("Navigator ready — listening on '{}'", Constants.QUEUE_NAVIGATOR_CMD);

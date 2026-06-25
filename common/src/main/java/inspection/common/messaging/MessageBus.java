@@ -9,6 +9,8 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeoutException;
 
 /**
@@ -77,13 +79,19 @@ public class MessageBus {
         logger.debug("绑定队列 {} 到交换器 {}", queueName, exchangeName);
     }
 
-    /** 声明共享队列（所有 session 共用，只需声明一次） */
+    /** 声明共享队列并清空旧消息 */
     public void declareSharedQueues() throws IOException {
-        declareQueue("ControllerCmd");
-        declareQueue(Constants.QUEUE_NAVIGATOR_CMD);
-        declareQueue(Constants.QUEUE_TARGET_PLANNER_CMD);
-        declareQueue(Constants.QUEUE_TASK_CONFIG_CMD);
-        logger.info("共享队列声明完成");
+        declareAndPurge("ControllerCmd");
+        declareAndPurge(Constants.QUEUE_NAVIGATOR_CMD);
+        declareAndPurge(Constants.QUEUE_TARGET_PLANNER_CMD);
+        declareAndPurge(Constants.QUEUE_TASK_CONFIG_CMD);
+        declareAndPurge(Constants.QUEUE_CAR_POOL);
+        logger.info("共享队列声明完成（已清空旧消息）");
+    }
+
+    private void declareAndPurge(String queueName) throws IOException {
+        channel.queueDeclare(queueName, true, false, false, null);
+        channel.queuePurge(queueName);
     }
 
     /** 声明指定 session 的队列（Fanout + 刷新队列 + CarPool 队列） */
@@ -106,7 +114,7 @@ public class MessageBus {
      * @param cmd 命令类型
      * @param data 数据对象（会被序列化为JSON）
      */
-    public void publish(String queueName, String cmd, Object data) {
+    public synchronized void publish(String queueName, String cmd, Object data) {
         try {
             JSONObject message = new JSONObject();
             message.put("cmd", cmd);
@@ -127,7 +135,7 @@ public class MessageBus {
      * @param cmd 命令类型
      * @param data 数据对象
      */
-    public void fanoutPublish(String exchangeName, String cmd, Object data) {
+    public synchronized void fanoutPublish(String exchangeName, String cmd, Object data) {
         try {
             JSONObject message = new JSONObject();
             message.put("cmd", cmd);
@@ -231,6 +239,45 @@ public class MessageBus {
      */
     public void replyToController(String sessionId, String cmd, Object data) {
         publish(Constants.getControllerCmdQueue(sessionId), cmd, data);
+    }
+
+    /**
+     * 并发订阅：消息到达后提交到线程池并行处理，不等上一个完成。
+     * 用于 Navigator、TargetPlanner、CarPool 等无状态 worker。
+     */
+    public void subscribeConcurrent(String queueName, MessageHandler handler, int concurrency) {
+        ExecutorService executor = Executors.newFixedThreadPool(concurrency, r -> {
+            Thread t = new Thread(r, "MQ-Worker-" + queueName);
+            t.setDaemon(true);
+            return t;
+        });
+        new Thread(() -> {
+            try {
+                Channel ch = connection.createChannel();
+                ch.queueDeclare(queueName, true, false, false, null);
+                ch.basicQos(concurrency);
+                DeliverCallback dc = (tag, delivery) -> {
+                    executor.submit(() -> {
+                        try {
+                            String body = new String(delivery.getBody(), StandardCharsets.UTF_8);
+                            JSONObject message = JSON.parseObject(body);
+                            String cmd = message.getString("cmd");
+                            JSONObject data = message.getJSONObject("data");
+                            long ts = message.getLongValue("timestamp");
+                            handler.handle(cmd, data, ts);
+                        } catch (Exception e) {
+                            logger.error("并发处理失败: {}", e.getMessage());
+                        } finally {
+                            try { ch.basicAck(delivery.getEnvelope().getDeliveryTag(), false); } catch (IOException ignored) {}
+                        }
+                    });
+                };
+                ch.basicConsume(queueName, false, dc, tag -> {});
+                logger.info("开始并发订阅: {} (threads={})", queueName, concurrency);
+            } catch (Exception e) {
+                logger.error("并发订阅失败: queue={}, error={}", queueName, e.getMessage());
+            }
+        }, "MQ-Concurrent-" + queueName).start();
     }
 
     /**

@@ -178,7 +178,7 @@ public class ControllerAgent {
 
             switch (status) {
                 case IDLE -> {
-                    requestTargetAssignment(sid, carId);
+                    requestTargetAssignment(sid, carId, tick);
                     session.pendingTargetRequests.add(carId);
                 }
                 case WAITING_ROUTE -> requestRoutePlan(sid, carId);
@@ -209,10 +209,11 @@ public class ControllerAgent {
         messageBus.publish(QUEUE_TARGET_PLANNER_CMD, CMD_RESET_BATCH, data);
     }
 
-    private void requestTargetAssignment(String sessionId, String carId) {
+    private void requestTargetAssignment(String sessionId, String carId, long tick) {
         JSONObject data = new JSONObject();
         data.put("sessionId", sessionId);
         data.put("carId", carId);
+        data.put("tick", tick);
         messageBus.publish(QUEUE_TARGET_PLANNER_CMD, CMD_ASSIGN_TARGET, data);
     }
 
