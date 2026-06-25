@@ -1,4 +1,6 @@
 <script setup>
+import ServiceStatusBar from './ServiceStatusBar.vue'
+
 defineProps({
   title: { type: String, default: '变电站巡检仿真系统' },
   connected: { type: Boolean, default: false }
@@ -14,6 +16,7 @@ defineEmits(['open-config', 'reset', 'addCar'])
       <span class="conn" :class="{ on: connected }">
         <span class="dot"></span>{{ connected ? '已连接' : '未连接' }}
       </span>
+      <ServiceStatusBar />
     </div>
     <div class="actions">
       <button class="btn add-car" @click="$emit('addCar')">＋ 添加小车</button>

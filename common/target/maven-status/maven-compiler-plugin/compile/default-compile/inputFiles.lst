@@ -2,10 +2,12 @@ C:\Users\19074\Desktop\BlackBoxAI\BlackBoxAI\common\src\main\java\inspection\com
 C:\Users\19074\Desktop\BlackBoxAI\BlackBoxAI\common\src\main\java\inspection\common\messaging\MessageType.java
 C:\Users\19074\Desktop\BlackBoxAI\BlackBoxAI\common\src\main\java\inspection\common\model\SimulationState.java
 C:\Users\19074\Desktop\BlackBoxAI\BlackBoxAI\common\src\main\java\inspection\common\model\Point.java
+C:\Users\19074\Desktop\BlackBoxAI\BlackBoxAI\common\src\main\java\inspection\common\service_discovery\InstanceId.java
 C:\Users\19074\Desktop\BlackBoxAI\BlackBoxAI\common\src\main\java\inspection\common\util\MapCompression.java
 C:\Users\19074\Desktop\BlackBoxAI\BlackBoxAI\common\src\main\java\inspection\common\messaging\MessageBus.java
 C:\Users\19074\Desktop\BlackBoxAI\BlackBoxAI\common\src\main\java\inspection\common\model\RouteAlgorithm.java
 C:\Users\19074\Desktop\BlackBoxAI\BlackBoxAI\common\src\main\java\inspection\common\model\CarInfo.java
+C:\Users\19074\Desktop\BlackBoxAI\BlackBoxAI\common\src\main\java\inspection\common\service_discovery\HeartbeatService.java
 C:\Users\19074\Desktop\BlackBoxAI\BlackBoxAI\common\src\main\java\inspection\common\blackboard\BlackboardConfig.java
 C:\Users\19074\Desktop\BlackBoxAI\BlackBoxAI\common\src\main\java\inspection\common\util\Constants.java
 C:\Users\19074\Desktop\BlackBoxAI\BlackBoxAI\common\src\main\java\inspection\common\blackboard\BlackboardClient.java

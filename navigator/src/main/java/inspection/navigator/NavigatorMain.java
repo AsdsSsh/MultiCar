@@ -5,6 +5,7 @@ import inspection.common.blackboard.BlackboardConfig;
 import inspection.common.config.ConnectionConfig;
 import inspection.common.messaging.MessageBus;
 import inspection.common.messaging.MessageConfig;
+import inspection.common.service_discovery.HeartbeatService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,7 +37,11 @@ public class NavigatorMain {
             messageBus.connect();
             log.info("Connected to RabbitMQ");
 
-            // 3. 启动 NavigatorAgent
+            // 3. 启动心跳
+            HeartbeatService heartbeat = new HeartbeatService(bbConfig, "navigator");
+            heartbeat.start();
+
+            // 4. 启动 NavigatorAgent
             final NavigatorAgent agent = new NavigatorAgent(blackboard, messageBus);
             agent.start();
 
@@ -45,6 +50,7 @@ public class NavigatorMain {
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 log.info("Shutting down Navigator...");
                 agent.close();
+                heartbeat.close();
                 messageBus.close();
                 blackboard.close();
             }));

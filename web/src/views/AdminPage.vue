@@ -1,13 +1,17 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../store/authStore.js'
+import { useSimulationStore } from '../store/simulationStore.js'
 import { api } from '../utils/api.js'
+import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const simStore = useSimulationStore()
 
-const activeTab = ref('users')  // 'users' | 'registrations'
+const activeTab = ref('users')  // 'users' | 'registrations' | 'services'
+const services = computed(() => simStore.services)
 const users = ref([])
 const registrations = ref([])
 const loading = ref(false)
@@ -36,7 +40,15 @@ const approveAssignedRole = ref('')
 
 onMounted(() => {
   loadData()
+  loadServices()
 })
+
+async function loadServices() {
+  try {
+    const res = await api.getServiceStatus()
+    simStore.setServices(res.services || {})
+  } catch (e) { /* */ }
+}
 
 async function loadData() {
   loading.value = true
@@ -181,6 +193,7 @@ function formatTime(ts) {
         <span class="role-badge admin">管理员</span>
       </div>
       <div class="user-area">
+        <ServiceStatusBar />
         <span class="user-name">{{ authStore.username }}</span>
         <button class="btn logout" @click="logout">退出登录</button>
       </div>
@@ -193,6 +206,9 @@ function formatTime(ts) {
       </button>
       <button :class="{ active: activeTab === 'registrations' }" @click="activeTab = 'registrations'">
         注册审批 ({{ registrations.filter(r => r.status === 'PENDING').length }} 待处理)
+      </button>
+      <button :class="{ active: activeTab === 'services' }" @click="activeTab = 'services'">
+        服务状态
       </button>
     </div>
 
@@ -233,7 +249,7 @@ function formatTime(ts) {
     </div>
 
     <!-- 注册请求列表 -->
-    <div v-else class="content">
+    <div v-else-if="activeTab === 'registrations'" class="content">
       <table class="data-table">
         <thead>
           <tr>
@@ -267,6 +283,27 @@ function formatTime(ts) {
         </tbody>
       </table>
       <div v-if="registrations.length === 0" class="empty">暂无注册请求</div>
+    </div>
+
+    <!-- 服务状态 -->
+    <div v-else-if="activeTab === 'services'" class="content">
+      <table class="data-table">
+        <thead>
+          <tr><th>组件</th><th>实例数</th><th>实例详情</th></tr>
+        </thead>
+        <tbody>
+          <tr v-for="(list, type) in services" :key="type">
+            <td>{{ type }}</td>
+            <td><span :class="list.length > 0 ? 'text-green' : 'text-red'">{{ list.length }}</span></td>
+            <td class="mono">
+              <div v-for="inst in list" :key="inst.instanceId" class="instance-row">
+                {{ inst.host }} &nbsp; pid {{ inst.pid }} &nbsp; {{ formatTime(inst.startedAt) }}
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div v-if="Object.keys(services).length === 0" class="empty">暂无运行中的后端服务</div>
     </div>
 
     <!-- 新增用户弹窗 -->
@@ -514,4 +551,6 @@ function formatTime(ts) {
   display: flex; gap: 10px; justify-content: flex-end;
   margin-top: 16px;
 }
+.mono { font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; }
+.instance-row { margin-bottom: 2px; color: #aaa; }
 </style>

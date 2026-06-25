@@ -2,9 +2,10 @@ const jwt = require('../auth/jwt');
 const recorder = require('../services/recorder');
 
 class WsHandler {
-  constructor(pushService, rabbitClient) {
+  constructor(pushService, rabbitClient, serviceDiscovery) {
     this.pushService = pushService;
     this.rabbitClient = rabbitClient;
+    this.serviceDiscovery = serviceDiscovery;
   }
 
   _extractUser(req) {
@@ -26,6 +27,15 @@ class WsHandler {
 
     ws._user = user;
     this.pushService.addSession(ws);
+
+    // 首次连接立即推送当前服务状态
+    if (this.serviceDiscovery) {
+      const snapshot = this.serviceDiscovery.getSnapshot();
+      if (Object.keys(snapshot).length > 0) {
+        this.pushService.broadcastServiceUpdate(snapshot);
+      }
+    }
+
     console.log(`[WS] 客户端连接 user=${user.username} role=${user.role}`);
 
     ws.on('message', (data) => this._handleMessage(ws, data));

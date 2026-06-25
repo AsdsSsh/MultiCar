@@ -170,5 +170,10 @@ export const api = {
 
   getReplaySession(sessionId) {
     return request(`/api/replay/sessions/${sessionId}`)
+  },
+
+  // 服务发现
+  getServiceStatus() {
+    return request('/api/services/status')
   }
 }

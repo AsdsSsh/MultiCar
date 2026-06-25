@@ -27,7 +27,9 @@ export const useSimulationStore = defineStore('simulation', {
     editCarPositions: [],      // 编辑中的小车初始位置 [{carId, x, y}, ...]
     editCarCount: 0,           // 编辑模式下的小车数量
     editMapWidth: 0,           // 编辑模式下的地图宽度
-    editMapHeight: 0           // 编辑模式下的地图高度
+    editMapHeight: 0,           // 编辑模式下的地图高度
+
+    services: {}  // { navigator: [{instanceId,host,pid,...}], ... }
   }),
 
   getters: {
@@ -121,6 +123,10 @@ export const useSimulationStore = defineStore('simulation', {
 
     setActiveCar(carId) {
       this.activeCarId = carId
+    },
+
+    setServices(snapshot) {
+      this.services = snapshot || {}
     },
 
     // ===== 地图编辑模式 actions =====

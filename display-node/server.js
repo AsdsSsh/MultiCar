@@ -7,6 +7,7 @@ const config = require('./config');
 const { authMiddleware } = require('./auth/middleware');
 const BlackboardReader = require('./redis/blackboardReader');
 const PushService = require('./services/pushService');
+const ServiceDiscovery = require('./services/serviceDiscovery');
 const RabbitClient = require('./mq/rabbitClient');
 const WsHandler = require('./ws/wsHandler');
 
@@ -15,6 +16,7 @@ const adminRoutes = require('./routes/admin');
 const mapConfigRoutes = require('./routes/mapConfig');
 const replayRoutes = require('./routes/replay');
 const simulationRoutes = require('./routes/simulation');
+const serviceRoutes = require('./routes/service');
 const jsonFileStore = require('./store/jsonFileStore');
 
 async function main() {
@@ -31,11 +33,17 @@ async function main() {
   const pushService = new PushService(blackboardReader);
   app.set('pushService', pushService);
 
+  const serviceDiscovery = new ServiceDiscovery();
+  serviceDiscovery.start((snapshot) => {
+    pushService.broadcastServiceUpdate(snapshot);
+  });
+  app.set('serviceDiscovery', serviceDiscovery);
+
   const rabbitClient = new RabbitClient();
   rabbitClient.setPushService(pushService);
   await rabbitClient.connect();
 
-  const wsHandler = new WsHandler(pushService, rabbitClient);
+  const wsHandler = new WsHandler(pushService, rabbitClient, serviceDiscovery);
   const wss = new WebSocketServer({ server, path: '/ws/simulation' });
   wss.on('connection', (ws, req) => wsHandler.onConnection(ws, req));
 
@@ -44,6 +52,7 @@ async function main() {
   app.use('/api/config', mapConfigRoutes);
   app.use('/api/replay', replayRoutes);
 app.use('/api/simulation', simulationRoutes);
+app.use('/api/services', serviceRoutes);
 
   await jsonFileStore.initRedis();
 

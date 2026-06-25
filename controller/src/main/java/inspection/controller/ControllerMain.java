@@ -5,6 +5,7 @@ import inspection.common.blackboard.BlackboardConfig;
 import inspection.common.config.ConnectionConfig;
 import inspection.common.messaging.MessageBus;
 import inspection.common.messaging.MessageConfig;
+import inspection.common.service_discovery.HeartbeatService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,7 +39,11 @@ public class ControllerMain {
             // 3. 声明共享队列
             messageBus.declareSharedQueues();
 
-            // 4. 创建并启动Controller
+            // 4. 启动心跳
+            HeartbeatService heartbeat = new HeartbeatService(bbConfig, "controller");
+            heartbeat.start();
+
+            // 5. 创建并启动Controller
             ControllerAgent controller = new ControllerAgent(blackboard, messageBus);
             controller.start();
 
@@ -46,6 +51,7 @@ public class ControllerMain {
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 log.info("Shutting down Controller...");
                 controller.stop();
+                heartbeat.close();
                 messageBus.close();
                 blackboard.close();
                 log.info("Controller stopped.");

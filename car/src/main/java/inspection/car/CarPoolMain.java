@@ -7,6 +7,7 @@ import inspection.common.blackboard.DistributedLock;
 import inspection.common.config.ConnectionConfig;
 import inspection.common.messaging.MessageBus;
 import inspection.common.messaging.MessageConfig;
+import inspection.common.service_discovery.HeartbeatService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,9 +28,10 @@ public class CarPoolMain {
     private final BlackboardClient blackboard;
     private final MessageBus messageBus;
     private final DistributedLock distributedLock;
+    private final BlackboardConfig bbConfig;
 
     public CarPoolMain() {
-        BlackboardConfig bbConfig = ConnectionConfig.loadBlackboardConfig();
+        this.bbConfig = ConnectionConfig.loadBlackboardConfig();
         this.blackboard = new BlackboardClient(bbConfig);
         this.distributedLock = new DistributedLock(blackboard.getJedisPool());
 
@@ -41,10 +43,14 @@ public class CarPoolMain {
         messageBus.connect();
         log.info("CarPool connected to MQ");
 
+        HeartbeatService heartbeat = new HeartbeatService(bbConfig, "carpool");
+        heartbeat.start();
+
         messageBus.subscribe(QUEUE_CAR_POOL, this::handleMessage);
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             log.info("CarPool shutting down...");
+            heartbeat.close();
             messageBus.close();
             blackboard.close();
             log.info("CarPool stopped.");

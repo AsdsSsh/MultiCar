@@ -55,6 +55,9 @@ export function useWebSocket(store, url = WS_URL, callbacks = {}) {
           callbacks.onSimulationListUpdated()
         }
       }
+      if (msg && msg.type === WS_TYPES.SERVICE_UPDATE) {
+        store.setServices(msg.services)
+      }
     }
 
     ws.onclose = () => {

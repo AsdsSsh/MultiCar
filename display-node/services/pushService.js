@@ -48,6 +48,15 @@ class PushService {
     }
   }
 
+  broadcastServiceUpdate(snapshot) {
+    const msg = JSON.stringify({ type: 'SERVICE_UPDATE', services: snapshot });
+    for (const ws of this.sessions.keys()) {
+      if (ws.readyState === 1) {
+        try { ws.send(msg); } catch (e) { }
+      }
+    }
+  }
+
   async pushStateUpdate(tick, sessionId) {
     try {
       const config = await this.reader.readTaskConfig(sessionId);

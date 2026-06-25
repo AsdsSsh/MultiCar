@@ -3,6 +3,7 @@ package inspection.taskconfigurator;
 import inspection.common.blackboard.BlackboardConfig;
 import inspection.common.config.ConnectionConfig;
 import inspection.common.messaging.MessageConfig;
+import inspection.common.service_discovery.HeartbeatService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -20,12 +21,16 @@ public class TaskConfiguratorMain {
         BlackboardConfig bbConfig = ConnectionConfig.loadBlackboardConfig();
         MessageConfig mqConfig = ConnectionConfig.loadMessageConfig();
 
+        HeartbeatService heartbeat = new HeartbeatService(bbConfig, "taskconfig");
+        heartbeat.start();
+
         TaskConfiguratorAgent agent = new TaskConfiguratorAgent(bbConfig, mqConfig);
 
         // 关闭钩子
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             logger.info("正在关闭 TaskConfigurator...");
             agent.stop();
+            heartbeat.close();
         }));
 
         agent.start();

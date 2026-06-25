@@ -5,6 +5,7 @@ import inspection.common.blackboard.BlackboardConfig;
 import inspection.common.config.ConnectionConfig;
 import inspection.common.messaging.MessageBus;
 import inspection.common.messaging.MessageConfig;
+import inspection.common.service_discovery.HeartbeatService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,7 +37,11 @@ public class TargetPlannerMain {
             messageBus.connect();
             log.info("Connected to RabbitMQ");
 
-            // 3. 启动 TargetPlannerAgent
+            // 3. 启动心跳
+            HeartbeatService heartbeat = new HeartbeatService(bbConfig, "targetplanner");
+            heartbeat.start();
+
+            // 4. 启动 TargetPlannerAgent
             final TargetPlannerAgent agent = new TargetPlannerAgent(blackboard, messageBus);
             agent.start();
 
@@ -45,6 +50,7 @@ public class TargetPlannerMain {
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 log.info("Shutting down TargetPlanner...");
                 agent.close();
+                heartbeat.close();
                 messageBus.close();
                 blackboard.close();
             }));
