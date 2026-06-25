@@ -44,7 +44,7 @@ public class ControllerMain {
             heartbeat.start();
 
             // 5. 创建并启动Controller
-            ControllerAgent controller = new ControllerAgent(blackboard, messageBus);
+            ControllerAgent controller = new ControllerAgent(blackboard, messageBus, heartbeat.getInstanceId());
             controller.start();
 
             // 5. 注册关闭钩子

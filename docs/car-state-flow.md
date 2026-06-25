@@ -39,12 +39,14 @@ Controller tick (每个 session 独立线程，每 500ms)
     遍历所有小车，按状态分别处理：
 
     IDLE ──────────────────────────────────────────────
-      │  requestTargetAssignment(sessionId, carId)
+      │  requestTargetAssignment(sessionId, carId, tick)
       ▼
-    TargetPlannerCmd 队列 ──→ TargetPlanner (多实例)
+    TargetPlannerCmd 队列 ──→ TargetPlanner (多实例, 4线程并发)
       │                           │
-      │                    扫描未探索区域
-      │                    SET NX 原子抢占目标
+      │                    扫描未探索区域（本地计算）
+      │                    按距离排序候选点
+      │                    对最近的点做 SET NX（1次 Redis）
+      │                    失败则试下一个
       │                    setCarTarget (Redis)
       │                           │
       │◄── reply TARGET_ASSIGNED ─┘
@@ -55,7 +57,7 @@ Controller tick (每个 session 独立线程，每 500ms)
     WAITING_ROUTE ─────────────────────────────────────
       │  requestRoutePlan(sessionId, carId)
       ▼
-    NavigatorCmd 队列 ──→ Navigator (多实例)
+    NavigatorCmd 队列 ──→ Navigator (多实例, 4线程并发)
       │                       │
       │                读地图、位置、目标 (Redis)
       │                读其他小车位置作为动态障碍
@@ -70,7 +72,7 @@ Controller tick (每个 session 独立线程，每 500ms)
     READY ────────────────────────────────────────────
       │  broadcastTickMove(sessionId, carId)
       ▼
-    CarPool 队列 ──→ CarPool (多实例，无状态)
+    CarPool 队列 ──→ CarPool (多实例, 4线程并发, 无状态)
       │                   │
       │            new CarAgent(carId)
       │            加分布式锁 peek 下一步
@@ -138,15 +140,28 @@ Controller tick (每个 session 独立线程，每 500ms)
      └───────────────┘
 ```
 
+## 并发处理
+
+Worker 组件使用 `subscribeConcurrent` 替代 `subscribe`：消息到达后立即提交到线程池（4线程），不等上一个完成就收下一条。`basicQos(4)` + 手动 ack。
+
+| 组件 | 并发度 | 线程池 |
+|------|--------|--------|
+| TargetPlanner | 4 线程 | `MQ-Worker-TargetPlannerCmd` |
+| Navigator | 4 线程 | `MQ-Worker-NavigatorCmd` |
+| CarPool | 4 线程 | `MQ-Worker-CarPool` |
+
+Controller 保持同步 `subscribe`（维护 in-memory 状态）。`publish`/`fanoutPublish` 加 `synchronized` 保证多线程 emit 安全。
+
 ## 分布式保障
 
 | 机制 | 实现 | 用途 |
 |------|------|------|
 | 分布式锁 | Redis `SET NX PX` + Lua 解锁 | 移动执行、路径写入时互斥 |
-| 目标抢占 | Redis `SET NX EX` | TargetPlanner 原子分配目标 |
+| 目标抢占 | Redis `SET NX EX`（仅 1-2 次 / 车） | TargetPlanner 原子分配目标 |
 | 服务心跳 | Redis `SET key EX 5` | 服务发现，每 2s 心跳 |
 | Session 隔离 | MQ 队列 + Redis key 前缀 | 多仿真并行，互不干扰 |
-| 多实例负载 | MQ 轮询 + `basicQos(1)` | Navigator / CarPool / TargetPlanner 水平扩展 |
+| 多实例负载 | MQ 轮询 + 线程池并发 | 水平扩展，跨机器分担 |
+| 无效消息过滤 | `isTaskActive` 快速检查 | 旧 session 堆积消息秒级丢弃 |
 
 ## 多实例支持
 
@@ -154,9 +169,17 @@ Controller tick (每个 session 独立线程，每 500ms)
 
 | 组件 | 机制 |
 |------|------|
-| Controller | SET_CONFIG 时抢占订阅 `ControllerCmd_{sid}` |
-| TargetPlanner | Redis `SET NX` 原子抢占目标 |
-| Navigator | 无状态 + MQ 轮询 + 分布式锁 |
+| Controller | SET_CONFIG 抢占订阅 `ControllerCmd_{sid}`，初始化命令走共享队列 |
+| TargetPlanner | tick 携带在消息中，Redis `SET NX` 按 `{session}:{tick}:{x},{y}` 隔离 |
+| Navigator | 无状态 + 线程池并发 + 分布式锁 |
 | CarPool | 无状态每次 new CarAgent + 分布式锁 |
 | TaskConfigurator | 无状态，操作幂等 |
-| display-node | 状态全在 Redis |
+| display-node | 状态全在 Redis，MQ 智能路由（初始化命令走共享，其他走 session 专属） |
+
+### 多 Controller 流量路由
+
+```
+display-node publishCommand(cmd, data):
+  cmd ∈ {SET_CONFIG, SET_MAP_EDIT, RESET} → 共享 ControllerCmd
+  其他 + data.sessionId 存在             → ControllerCmd_{sessionId}
+```

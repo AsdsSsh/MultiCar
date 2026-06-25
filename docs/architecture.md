@@ -211,13 +211,13 @@ BlackBoxAI/
 
 ### 共享队列 (所有 session 共用)
 
-| 队列名 | 消费者 | 消息类型 |
-|--------|--------|----------|
-| `ControllerCmd` | ControllerAgent | 所有前端命令 + Agent 回复 |
-| `NavigatorCmd` | NavigatorAgent | PLAN_ROUTE |
-| `TargetPlannerCmd` | TargetPlannerAgent | ASSIGN_TARGET, RESET_BATCH |
-| `TaskConfigCmd` | TaskConfiguratorAgent | FORWARD_CONFIG, FORWARD_RESET |
-| `CarPool` | CarPoolMain (无状态，支持多实例) | TICK_MOVE |
+| 队列名 | 消费者 | 处理模式 | 消息类型 |
+|--------|--------|----------|----------|
+| `ControllerCmd` | ControllerAgent | 同步 `subscribe` | Web 初始化命令 |
+| `NavigatorCmd` | NavigatorAgent | 4线程 `subscribeConcurrent` | PLAN_ROUTE |
+| `TargetPlannerCmd` | TargetPlannerAgent | 4线程 `subscribeConcurrent` | ASSIGN_TARGET, RESET_BATCH |
+| `TaskConfigCmd` | TaskConfiguratorAgent | 同步 `subscribe` | FORWARD_CONFIG, FORWARD_RESET |
+| `CarPool` | CarPoolMain (无状态，支持多实例) | 4线程 `subscribeConcurrent` | TICK_MOVE |
 
 ### 每 Session 动态队列
 
@@ -228,11 +228,17 @@ BlackBoxAI/
 
 ### 消息分发
 
-`MessageBus.subscribe()` 和 `subscribeFanout()` 均设置 `basicQos(1)`，每个消费者一次只预取一条消息。多实例订阅同一队列时，RabbitMQ 在实例间公平轮询分发。
+- **Worker (Navigator/TargetPlanner/CarPool)**：使用 `subscribeConcurrent`，消息到达后提交到 4 线程池并行处理，`basicQos(4)` + 手动 ack。
+- **Controller**：使用 `subscribe`（同步），维护 in-memory 状态。
+- `MessageBus.publish` / `fanoutPublish` 加 `synchronized`，多线程 emit 安全。
 
 ### CarPool 无状态模式
 
 CarPool 不再缓存 CarAgent。每次收到 `TICK_MOVE` 创建临时 `CarAgent` 处理，处理完后丢弃。所有小车状态存储在 Redis，由分布式锁保证互斥。详见 [多实例部署指南](multi-instance-deployment.md)。
+
+### TargetPlanner 目标分配
+
+本地按距离排序候选格点，只对最近的候选做 1 次 Redis `SET NX` 抢占，失败则试下一个。从每车 N 次 Redis 往返优化为 1-2 次。
 
 ## 7. 完整仿真生命周期
 

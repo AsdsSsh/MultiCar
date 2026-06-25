@@ -29,7 +29,8 @@ export const useSimulationStore = defineStore('simulation', {
     editMapWidth: 0,           // 编辑模式下的地图宽度
     editMapHeight: 0,           // 编辑模式下的地图高度
 
-    services: {}  // { navigator: [{instanceId,host,pid,...}], ... }
+    services: {},  // { navigator: [{instanceId,host,pid,...}], ... }
+    controllerId: null,  // 当前 session 所在的 Controller 实例 ID
   }),
 
   getters: {
@@ -75,6 +76,7 @@ export const useSimulationStore = defineStore('simulation', {
       if (payload.sessionId) this.sessionId = payload.sessionId
       if (typeof payload.tick === 'number') this.tick = payload.tick
       if (typeof payload.running === 'boolean') this.isRunning = payload.running
+      if (payload.controllerId !== undefined) this.controllerId = payload.controllerId
       if (payload.config) {
         this.config = { ...this.config, ...payload.config }
         // 强制 mapWidth/mapHeight 为数字类型，防止字符串导致渲染异常

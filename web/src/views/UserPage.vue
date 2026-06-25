@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../store/authStore.js'
 import { useSimulationStore } from '../store/simulationStore.js'
@@ -8,10 +8,18 @@ import { api } from '../utils/api.js'
 import { COMMANDS, WS_URL, ALGORITHMS, CAR_COLORS } from '../utils/constants.js'
 import SimulationCanvas from '../components/SimulationCanvas.vue'
 import CarStatusList from '../components/CarStatusList.vue'
+import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
 const store = useSimulationStore()
+
+/** 当前 Controller 是否在线 */
+const controllerOnline = computed(() => {
+  if (!store.controllerId) return false
+  const list = store.services?.controller || []
+  return list.some(c => c.instanceId === store.controllerId)
+})
 
 // ===== 状态 =====
 const viewMode = ref('list')  // 'list' | 'simulation'
@@ -358,6 +366,12 @@ function formatTime(ts) {
         <span class="conn" :class="{ on: connected }">
           <span class="dot"></span>{{ connected ? '已连接' : '未连接' }}
         </span>
+        <span v-if="store.controllerId" class="controller-info"
+              :class="{ on: controllerOnline }"
+              :title="'Controller: ' + store.controllerId">
+          <span class="dot"></span>{{ controllerOnline ? '控制器在线' : '控制器离线' }}
+        </span>
+        <ServiceStatusBar />
       </div>
       <div class="actions">
         <button v-if="viewMode === 'simulation'" class="btn" @click="exitSimulation">← 返回仿真列表</button>

@@ -533,6 +533,20 @@ public class BlackboardClient {
     // ==================== 清空 ====================
 
     /** 清空指定 session 的所有数据 */
+    /** 记录 session 所在的 Controller 实例 */
+    public void setSessionController(String sessionId, String instanceId) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            jedis.set(Constants.getSessionPrefix(sessionId) + "controller", instanceId);
+        }
+    }
+
+    /** 读取 session 所在的 Controller 实例 */
+    public String getSessionController(String sessionId) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            return jedis.get(Constants.getSessionPrefix(sessionId) + "controller");
+        }
+    }
+
     public void clearSession(String sessionId) {
         String prefix = Constants.getSessionPrefix(sessionId);
         try (Jedis jedis = jedisPool.getResource()) {

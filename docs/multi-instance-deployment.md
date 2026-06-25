@@ -1,178 +1,112 @@
 # 多实例部署指南
 
-## 1. 概述
+## 1. 组件可扩展性
 
-系统基于**黑板架构**设计，各组件通过 RabbitMQ + Redis 解耦协作。部分组件支持横向扩展（多实例部署），通过 RabbitMQ 轮询分发 + Redis 分布式锁保证正确性。
-
-## 2. 组件可扩展性
+所有组件均支持多实例部署：
 
 | 组件 | 多实例 | 关键机制 |
 |------|--------|----------|
-| **Controller** | 单实例 | 集中式节拍调度，`SessionState` 在 JVM 内存中 |
-| **Navigator** | 多实例 | 无状态路径规划，MQ 轮询分发，分布式锁保护 |
-| **TargetPlanner** | 单实例 | `assignedThisBatch` 在内存中，多实例会重复分配目标 |
-| **CarPool** | 多实例 | 无状态模式，每次 `TICK_MOVE` 创建临时 CarAgent |
-| **TaskConfigurator** | 多实例 | 无状态，处理一次性初始化命令 |
+| **Controller** | 多实例 | SET_CONFIG 抢占订阅 `ControllerCmd_{sid}`，session 绑定到实例 |
+| **Navigator** | 多实例 | 无状态 + 4 线程并发 + MQ 轮询 + 分布式锁 |
+| **TargetPlanner** | 多实例 | tick 携带在消息中，Redis `SET NX` 按 `{session}:{tick}:{x},{y}` 隔离 |
+| **CarPool** | 多实例 | 无状态 + 4 线程并发 + MQ 轮询 + 分布式锁 |
+| **TaskConfigurator** | 多实例 | 无状态，操作幂等 |
+| **display-node** | 多实例 | 状态全在 Redis，MQ 智能路由 |
 
-### 多实例工作原理
+## 2. 并发模型
 
-```
-Controller ──TICK_MOVE──▶  CarPool 队列
-                              │
-                    RabbitMQ round-robin
-                    (basicQos=1)
-                         ╱          ╲
-                  CarPool#1       CarPool#2
-                  (机器A)         (机器B)
-                    │                │
-              new CarAgent     new CarAgent
-                    │                │
-              ┌─────┴────────────────┴─────┐
-              │     Redis 分布式锁          │
-              │  lock:{sid}:Car001          │
-              │  同一时刻只有一个能拿到锁     │
-              └────────────────────────────┘
-```
-
-## 3. 关键设计
-
-### 3.1 RabbitMQ 公平轮询
-
-`MessageBus.subscribe()` 设置了 `basicQos(1)`，每个消费者一次只预取一条消息，处理完后才接收下一条。多个实例订阅同一队列时，消息在实例间公平轮询分发。
-
-```java
-// MessageBus.java
-consumerChannel.basicQos(1);  // 每次只取一条
-consumerChannel.basicConsume(queueName, true, deliverCallback, tag -> {});
-```
-
-### 3.2 CarPool 无状态模式
-
-CarPool 不再缓存 CarAgent，每次收到 `TICK_MOVE` 消息直接创建临时 CarAgent 处理：
-
-```java
-// CarPoolMain.java
-private void handleMessage(String cmd, JSONObject data, long timestamp) {
-    if (!CMD_TICK_MOVE.equals(cmd)) return;
-    String carId = data.getString("carId");
-    if (carId == null) return;
-
-    new CarAgent(carId, blackboard, messageBus, distributedLock)
-            .handleMessage(cmd, data, timestamp);
-}
-```
-
-所有小车状态（位置、路线、状态机）存储在 Redis 中，CarAgent 构造函数默认 `running = true`，不依赖 `start()` 调用。
-
-### 3.3 Redis 分布式锁
-
-以小车粒度加锁，保证同一辆车的状态不会被多个实例同时修改：
-
-```java
-// DistributedLock.java - 基于 SET NX PX + Lua 原子解锁
-String lockKey = "lock:" + sessionId + ":" + carId;  // 如 lock:abc123:Car001
-distributedLock.executeWithLock(lockKey, LOCK_EXPIRE_MS, () -> {
-    // 临界区：读写 Redis 中该小车的状态
-});
-```
-
-### 3.4 Navigator 无状态计算
-
-Navigator 处理流程不依赖本地状态：
-1. 从消息中提取 `sessionId`、`carId`、`algorithm`
-2. 从 Redis 读取地图、小车位置、目标
-3. 执行 BFS/A* 路径计算
-4. 加锁后写入路径到 Redis
-5. 回复 Controller
-
-每个请求完全独立，多个 Navigator 实例可并行处理不同小车的路径规划。
-
-## 4. 部署示例
-
-### 4.1 单机部署（开发/调试）
+Worker 组件使用 `subscribeConcurrent`（线程池）替代 `subscribe`（同步处理）：
 
 ```
-机器 A:
-  Redis + RabbitMQ
-  TaskConfigurator ×1
-  Controller ×1
-  Navigator ×1
-  TargetPlanner ×1
-  CarPool ×1
-  display-node ×1
+MQ 消息 → 投递线程 → 线程池 (4 daemon) → 并行处理 → manual ack
+                  basicQos(4)
 ```
 
-### 4.2 多机部署（生产）
+| 组件 | 线程池 | 线程名 |
+|------|--------|--------|
+| TargetPlanner | `MQ-Worker-TargetPlannerCmd` | 4 |
+| Navigator | `MQ-Worker-NavigatorCmd` | 4 |
+| CarPool | `MQ-Worker-CarPool` | 4 |
+
+Controller 保持同步 `subscribe`（维护 in-memory 状态）。`MessageBus.publish` / `fanoutPublish` 加 `synchronized` 保证多线程 emit 安全。
+
+## 3. MQ 队列拓扑
 
 ```
-机器 A (10.0.0.1):          机器 B (10.0.0.2):          机器 C (10.0.0.3):
-  Redis                        RabbitMQ                     display-node
-  Controller ×1                                             Navigator ×2
-  TargetPlanner ×1                                          CarPool ×2
-  TaskConfigurator ×1                                       Navigator ×2
+display-node publishCommand(cmd, data):
+  cmd ∈ {SET_CONFIG, SET_MAP_EDIT, RESET} → ControllerCmd（共享）
+  其他 + data.sessionId                    → ControllerCmd_{sid}（session 专属）
 ```
 
-### 4.3 环境变量配置
+```
+                        ┌─────────────────────┐
+                        │   共享队列（持久化）   │
+                        │  ControllerCmd       │ ← Web 初始化命令
+                        │  NavigatorCmd        │ ← 路径规划请求
+                        │  TargetPlannerCmd    │ ← 目标分配请求
+                        │  TaskConfigCmd       │ ← 配置请求
+                        │  CarPool             │ ← 移动执行请求
+                        └─────────────────────┘
 
-每台机器通过环境变量指向共享的 Redis 和 RabbitMQ：
+                        ┌─────────────────────┐
+                        │  Session 专属队列     │
+                        │  ControllerCmd_{sid} │ ← Worker 回复 + Web 命令
+                        │  UpdateView_{sid}    │ ← Fanout 广播
+                        └─────────────────────┘
+```
+
+## 4. 多 Controller 工作原理
+
+```
+1. display-node → SET_CONFIG → ControllerCmd（共享）
+                              ↓ round-robin
+2. Controller#1 收到 → subscribeSessionReplies(sid)
+                     → 订阅 ControllerCmd_{sid}（专属绑定）
+                     → 转发 FORWARD_CONFIG → TaskConfigurator
+3. TaskConfigurator → TASK_READY → ControllerCmd_{sid}（只有#1监听）
+4. Controller#1 → 创建 session → 启动 tick
+5. 后续 RESUME/PAUSE/STOP 等 → ControllerCmd_{sid} → #1 专属处理
+6. Worker 回复（TARGET_ASSIGNED/ROUTE_PLANNED/MOVED 等）→ ControllerCmd_{sid} → #1
+
+另一个用户:
+  SET_CONFIG → ControllerCmd → round-robin 到 Controller#2
+  → 订阅 ControllerCmd_{sid2} → #2 独立管理 session2
+  
+#1 和 #2 互不干扰
+```
+
+## 5. 部署示例
+
+### 单机
+
+```
+Redis + RabbitMQ
+Controller ×1, TaskConfigurator ×1
+Navigator ×2, TargetPlanner ×2, CarPool ×2
+display-node ×1
+```
+
+### 多机
+
+```
+机器A: Redis, RabbitMQ, display-node ×1
+机器B: Controller ×1, TaskConfigurator ×1
+机器C: Navigator ×2, TargetPlanner ×2, CarPool ×3
+机器D: Navigator ×2, TargetPlanner ×2, CarPool ×3
+```
+
+### 环境变量
 
 ```bash
-# 机器 B 和 C 上设置
 export REDIS_HOST=10.0.0.1
-export REDIS_PORT=6379
-export MQ_HOST=10.0.0.2
-export MQ_PORT=5672
+export MQ_HOST=10.0.0.1
 export MQ_USERNAME=admin
 export MQ_PASSWORD=secret
 ```
 
-### 4.4 启动命令
+## 6. 注意事项
 
-```bash
-# 在机器 C 上启动多个 Navigator 实例
-java -cp "..." inspection.navigator.NavigatorMain &
-java -cp "..." inspection.navigator.NavigatorMain &  # 第二个实例
-
-# 在机器 C 上启动多个 CarPool 实例
-java -cp "..." inspection.car.CarPoolMain &
-java -cp "..." inspection.car.CarPoolMain &  # 第二个实例
-```
-
-多个实例订阅同一个队列，RabbitMQ 自动轮询分发消息。
-
-## 5. 当前限制
-
-### 5.1 Controller（不可多实例）
-
-Controller 在 `ConcurrentHashMap<String, SessionState>` 中维护 session 状态（tick 计数、暂停标志、pending 请求等），多个实例会重复调度同一 session。
-
-如需支持，需要将 `SessionState` 迁移到 Redis 并用分布式锁保护每个 tick 的执行。
-
-### 5.2 TargetPlanner（不可多实例）
-
-`assignedThisBatch` 用于在当前 tick 内避免重复分配同一目标点给不同小车。此状态在 JVM 内存中，多实例互不可见。
-
-如需支持，改用 Redis `SET NX` 原子标记已分配目标：
-
-```java
-// 伪代码
-String key = "batch:" + sessionId + ":" + tick + ":" + targetXY;
-if (jedis.set(key, carId, SetParams.setParams().nx().ex(30)) == OK) {
-    // 分配成功
-}
-```
-
-### 5.3 display-node（有限多实例）
-
-WebSocket 连接绑定在单个 Node.js 进程上，不能直接多实例。可部署多个 display-node 实例但需要用 Redis Pub/Sub 或 MQ 共享状态，或在前端做 sticky session。
-
-## 6. 扩容建议
-
-| 场景 | 扩容策略 |
-|------|---------|
-| 路径规划成为瓶颈 | 增加 Navigator 实例（无状态，直接扩） |
-| 小车移动执行成为瓶颈 | 增加 CarPool 实例（无状态，直接扩） |
-| 初始化/重置变慢 | 增加 TaskConfigurator 实例 |
-| Controller 成为瓶颈 | 按 session 哈希分片，每个 Controller 管理不同 session |
-| Redis 成为瓶颈 | 升级 Redis Cluster / Sentinel |
-| RabbitMQ 成为瓶颈 | RabbitMQ 集群 + 镜像队列 |
+- **不要 purge 队列**：新 Controller 启动时只声明队列，不清空。Worker 通过 `isTaskActive` 快速丢弃旧 session 的消息。
+- **重启顺序**：先启 Redis/RabbitMQ，再启 Controller，最后启 Worker。Controller 先启动以确保共享队列存在。
+- **心跳间隔**：2s 心跳，5s TTL，display-node 每秒扫描。新实例 2s 内可见。
+- **扩容**：Worker 组件可直接增加实例，MQ 自动轮询。Controller 增加实例后新 session 自动分配。

@@ -62,6 +62,8 @@ public class HeartbeatService implements AutoCloseable {
         }, 0, INTERVAL_SEC, TimeUnit.SECONDS);
     }
 
+    public String getInstanceId() { return instanceId; }
+
     @Override
     public void close() {
         scheduler.shutdown();

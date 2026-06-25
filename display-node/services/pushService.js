@@ -68,11 +68,13 @@ class PushService {
       const w = config.mapWidth || 40;
       const h = config.mapHeight || 30;
 
+      const controllerId = await this.reader.getSessionController(sessionId);
       const state = {
         type: 'STATE_UPDATE',
         sessionId,
         tick,
         running: !(await this.reader.isPaused(sessionId)),
+        controllerId: controllerId || null,
         config,
         cars: await this.reader.readAllCars(sessionId),
         mapWidth: w,

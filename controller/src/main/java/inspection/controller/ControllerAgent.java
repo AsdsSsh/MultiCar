@@ -31,11 +31,13 @@ public class ControllerAgent {
     /** 活跃 session */
     private final Map<String, SessionState> sessions = new ConcurrentHashMap<>();
 
+    private final String instanceId;
     private long defaultTickIntervalMs = DEFAULT_TICK_INTERVAL_MS;
 
-    public ControllerAgent(BlackboardClient blackboard, MessageBus messageBus) {
+    public ControllerAgent(BlackboardClient blackboard, MessageBus messageBus, String instanceId) {
         this.blackboard = blackboard;
         this.messageBus = messageBus;
+        this.instanceId = instanceId;
         this.distributedLock = new DistributedLock(blackboard.getJedisPool());
         // 线程池，支持多个 session 独立并行 tick
         this.scheduler = Executors.newScheduledThreadPool(8, r -> {
@@ -293,7 +295,10 @@ public class ControllerAgent {
         // 启动 session 独立 tick 线程
         startSessionTick(session);
 
-        log.info("Session {} created, paused (waiting for user)", sessionId);
+        // 记录 session 所属 Controller
+        blackboard.setSessionController(sessionId, instanceId);
+
+        log.info("Session {} created on {}, paused (waiting for user)", sessionId, instanceId);
         broadcastViewUpdate(session);
     }
 

@@ -48,6 +48,12 @@ class BlackboardReader {
     return String(val) === '1';
   }
 
+  async getSessionController(sessionId) {
+    try {
+      return await this.redis.get(this._k(sessionId, 'controller'));
+    } catch (e) { return null; }
+  }
+
   async scanCarIds(sessionId) {
     const prefix = `session:${sessionId}:`;
     const keys = await this.redis.keys(prefix + 'Car*:Status');
