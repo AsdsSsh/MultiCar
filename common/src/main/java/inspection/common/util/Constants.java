@@ -40,12 +40,16 @@ public final class Constants {
         return "session:" + sessionId + ":";
     }
 
-    // ===== MQ 队列名（共享，不随 session 变化） =====
-    public static final String QUEUE_CONTROLLER_CMD = "ControllerCmd";
+    // ===== MQ 队列名 =====
     public static final String QUEUE_NAVIGATOR_CMD = "NavigatorCmd";
     public static final String QUEUE_TARGET_PLANNER_CMD = "TargetPlannerCmd";
     public static final String QUEUE_TASK_CONFIG_CMD = "TaskConfigCmd";
     public static final String QUEUE_CAR_POOL = "CarPool";
+
+    /** 每 session 独立的 ControllerCmd 队列（防止跨 session 阻塞） */
+    public static String getControllerCmdQueue(String sessionId) {
+        return "ControllerCmd_" + sessionId;
+    }
 
     /** 每 session 一个 Fanout 交换器 */
     public static String getSessionFanoutExchange(String sessionId) {

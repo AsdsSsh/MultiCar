@@ -125,7 +125,7 @@ public class TaskConfiguratorAgent {
             notify.put("carCount", carCount);
             notify.put("mapWidth", mapWidth);
             notify.put("mapHeight", mapHeight);
-            messageBus.publish(Constants.QUEUE_CONTROLLER_CMD, "TASK_READY", notify);
+            messageBus.publish(inspection.common.util.Constants.getControllerCmdQueue(sessionId), "TASK_READY", notify);
             logger.info("Session {} 初始化完成，已通知 Controller", sessionId);
 
         } catch (Exception e) {

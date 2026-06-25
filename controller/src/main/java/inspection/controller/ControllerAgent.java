@@ -12,10 +12,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static inspection.common.util.Constants.*;
@@ -34,16 +31,14 @@ public class ControllerAgent {
     /** 活跃 session */
     private final Map<String, SessionState> sessions = new ConcurrentHashMap<>();
 
-    /** 进程引用（用于运行时删除小车） */
-    private final Map<String, Process> carProcesses = new ConcurrentHashMap<>();
-
     private long defaultTickIntervalMs = DEFAULT_TICK_INTERVAL_MS;
 
     public ControllerAgent(BlackboardClient blackboard, MessageBus messageBus) {
         this.blackboard = blackboard;
         this.messageBus = messageBus;
         this.distributedLock = new DistributedLock(blackboard.getJedisPool());
-        this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+        // 线程池，支持多个 session 独立并行 tick
+        this.scheduler = Executors.newScheduledThreadPool(8, r -> {
             Thread t = new Thread(r, "Controller-Tick");
             t.setDaemon(true);
             return t;
@@ -55,9 +50,10 @@ public class ControllerAgent {
     private static class SessionState {
         final String sessionId;
         final AtomicLong tickCount = new AtomicLong(0);
-        final Set<String> pendingTargetRequests = new HashSet<>();
+        final Set<String> pendingTargetRequests = ConcurrentHashMap.newKeySet();
         volatile boolean paused = true;
         volatile boolean running = true;
+        volatile ScheduledFuture<?> tickFuture;
 
         SessionState(String sessionId) { this.sessionId = sessionId; }
     }
@@ -66,64 +62,87 @@ public class ControllerAgent {
 
     public void start() {
         running = true;
-        log.info("Controller started (multi-session), waiting for task activations...");
+        log.info("Controller started (multi-session, per-session tick threads), waiting for task activations...");
 
-        subscribeToCommands();
-
-        scheduler.scheduleAtFixedRate(this::tick, 1000, defaultTickIntervalMs, TimeUnit.MILLISECONDS);
+        // 共享队列：接收来自 display-node 的 Web 命令
+        messageBus.subscribe("ControllerCmd", (cmd, data, timestamp) -> {
+            log.debug("Controller received web command: cmd={}", cmd);
+            handleWebCommand(cmd, data);
+        });
     }
 
-    // ==================== 消息订阅 ====================
+    // ==================== Web 命令处理（共享 ControllerCmd 队列） ====================
 
-    private void subscribeToCommands() {
-        messageBus.subscribe(QUEUE_CONTROLLER_CMD, (cmd, data, timestamp) -> {
-            log.debug("Controller received: cmd={}", cmd);
-            String sessionId = data != null ? data.getString("sessionId") : null;
+    private void handleWebCommand(String cmd, JSONObject data) {
+        String sessionId = data != null ? data.getString("sessionId") : null;
+        switch (cmd) {
+            case CMD_SET_CONFIG, CMD_SET_MAP_EDIT, CMD_RESET -> forwardWebCommand(cmd, data);
+            case CMD_PAUSE -> handlePause(sessionId);
+            case CMD_STOP -> handleStop(sessionId);
+            case CMD_RESUME -> handleResume(sessionId);
+            case CMD_STEP_ONCE -> handleStepOnce(sessionId);
+            case CMD_ADD_CAR -> handleAddCar(sessionId, data);
+            case CMD_DELETE_CAR -> handleDeleteCar(sessionId, data);
+            case CMD_MOVE_CAR -> handleMoveCar(sessionId, data);
+            default -> log.warn("Unknown web command: {}", cmd);
+        }
+    }
 
+    // ==================== 回复处理（per-session ControllerCmd_{id} 队列） ====================
+
+    private void subscribeSessionReplies(String sessionId) {
+        String queue = getControllerCmdQueue(sessionId);
+        try {
+            messageBus.declareQueue(queue);
+        } catch (IOException e) {
+            log.error("Failed to declare session reply queue: {}", queue);
+        }
+        messageBus.subscribe(queue, (cmd, data, timestamp) -> {
+            log.debug("Session {} reply: cmd={}", sessionId, cmd);
             switch (cmd) {
                 case CMD_TARGET_ASSIGNED -> handleTargetAssigned(sessionId, data);
                 case CMD_ROUTE_PLANNED -> handleRoutePlanned(sessionId, data);
-                case CMD_TASK_READY -> handleTaskReady(sessionId, data);
                 case CMD_MOVED -> handleMoved(sessionId, data);
                 case CMD_BLOCKED -> handleBlocked(sessionId, data);
                 case CMD_ROUTE_DONE -> handleRouteDone(sessionId, data);
-                case CMD_SET_CONFIG -> forwardWebCommand(cmd, data);
-                case CMD_SET_MAP_EDIT -> forwardWebCommand(cmd, data);
-                case CMD_RESET -> forwardWebCommand(cmd, data);
-                case CMD_PAUSE -> handlePause(sessionId);
-                case CMD_STOP -> handleStop(sessionId);
-                case CMD_RESUME -> handleResume(sessionId);
-                case CMD_STEP_ONCE -> handleStepOnce(sessionId);
-                case CMD_ADD_CAR -> handleAddCar(sessionId, data);
-                case CMD_DELETE_CAR -> handleDeleteCar(sessionId, data);
-                case CMD_MOVE_CAR -> handleMoveCar(sessionId, data);
-                default -> log.warn("Unknown command: {}", cmd);
+                default -> log.warn("Unknown reply for session {}: {}", sessionId, cmd);
             }
         });
     }
 
-    // ==================== 节拍主循环 ====================
+    // ==================== Session Tick 调度 ====================
 
-    private void tick() {
-        try {
-            for (SessionState session : sessions.values()) {
+    private void startSessionTick(SessionState session) {
+        ScheduledFuture<?> future = scheduler.scheduleWithFixedDelay(() -> {
+            try {
+                if (!session.running) return;
                 if (session.paused) {
                     broadcastViewUpdate(session);
-                    continue;
+                    return;
                 }
                 tickSession(session);
+            } catch (Exception e) {
+                log.error("Error in session {} tick: {}", session.sessionId, e.getMessage(), e);
             }
-        } catch (Exception e) {
-            log.error("Error in tick: {}", e.getMessage(), e);
+        }, 1000, defaultTickIntervalMs, TimeUnit.MILLISECONDS);
+        session.tickFuture = future;
+        log.info("Session {} tick started (interval={}ms)", session.sessionId, defaultTickIntervalMs);
+    }
+
+    private void stopSessionTick(SessionState session) {
+        if (session.tickFuture != null) {
+            session.tickFuture.cancel(false);
         }
     }
+
+    // ==================== 节拍主逻辑 ====================
 
     private void tickSession(SessionState session) {
         String sid = session.sessionId;
         long tick = session.tickCount.incrementAndGet();
         log.debug("=== Tick {} Session {} ===", tick, sid);
 
-        resetTargetPlannerBatch(sid);
+        resetTargetPlannerBatch(session);
 
         if (!blackboard.isTaskActive(sid)) return;
 
@@ -133,6 +152,7 @@ public class ControllerAgent {
         if (explored >= EXPLORATION_COMPLETE_THRESHOLD) {
             log.info("Session {} exploration complete! Rate: {}%", sid, String.format("%.1f", explored));
             session.running = false;
+            stopSessionTick(session);
             sessions.remove(sid);
             return;
         }
@@ -170,9 +190,11 @@ public class ControllerAgent {
 
     // ==================== 调度命令 ====================
 
-    private void resetTargetPlannerBatch(String sessionId) {
+    private void resetTargetPlannerBatch(SessionState session) {
+        String sessionId = session.sessionId;
         JSONObject data = new JSONObject();
         data.put("sessionId", sessionId);
+        data.put("tick", session.tickCount.get() + 1);
         messageBus.publish(QUEUE_TARGET_PLANNER_CMD, CMD_RESET_BATCH, data);
     }
 
@@ -249,10 +271,18 @@ public class ControllerAgent {
             log.error("Failed to declare session queues for {}: {}", sessionId, e.getMessage());
         }
 
-        sessions.put(sessionId, new SessionState(sessionId));
+        // 订阅 session 专属回复队列
+        subscribeSessionReplies(sessionId);
+
+        SessionState session = new SessionState(sessionId);
+        sessions.put(sessionId, session);
         blackboard.setPaused(sessionId, true);
+
+        // 启动 session 独立 tick 线程
+        startSessionTick(session);
+
         log.info("Session {} created, paused (waiting for user)", sessionId);
-        broadcastViewUpdate(sessions.get(sessionId));
+        broadcastViewUpdate(session);
     }
 
     private void handleMoved(String sessionId, JSONObject data) {
@@ -278,6 +308,7 @@ public class ControllerAgent {
         if (s != null) {
             s.running = false;
             s.paused = true;
+            stopSessionTick(s);
             blackboard.clearSession(sessionId);
             log.info("Session {} STOPPED and cleaned", sessionId);
         }
@@ -297,14 +328,14 @@ public class ControllerAgent {
         if (s != null && s.paused) {
             s.paused = false;
             blackboard.setPaused(sessionId, false);
-            log.info("Session {} RESUMED (immediate tick)", sessionId);
-            scheduler.schedule(() -> tickSession(s), 0, TimeUnit.MILLISECONDS);
+            log.info("Session {} RESUMED", sessionId);
+            scheduler.execute(() -> tickSession(s));
         }
     }
 
     private void handleStepOnce(String sessionId) {
         SessionState s = sessions.get(sessionId);
-        if (s != null) tickSession(s);
+        if (s != null) scheduler.execute(() -> tickSession(s));
     }
 
     // ==================== 运行时小车管理 ====================
@@ -398,7 +429,6 @@ public class ControllerAgent {
             }
         }
 
-        // 线性扫描兜底
         for (int y = 0; y < mapHeight; y++) {
             for (int x = 0; x < mapWidth; x++) {
                 String key = x + "," + y;
@@ -410,7 +440,7 @@ public class ControllerAgent {
         return null;
     }
 
-    // ==================== Web 命令转发（带 sessionId） ====================
+    // ==================== Web 命令转发 ====================
 
     private void forwardWebCommand(String cmd, JSONObject data) {
         String forwardCmd = switch (cmd) {
@@ -420,12 +450,12 @@ public class ControllerAgent {
             default -> null;
         };
         if (forwardCmd != null) {
-            // 为 SET_CONFIG 生成 sessionId
             if (CMD_SET_CONFIG.equals(cmd) && (data == null || !data.containsKey("sessionId"))) {
                 String sessionId = UUID.randomUUID().toString().substring(0, 8);
                 data = data != null ? data : new JSONObject();
                 data.put("sessionId", sessionId);
-                log.info("Generated sessionId: {} for SET_CONFIG", sessionId);
+                log.info("Generated sessionId: {} for SET_CONFIG, subscribing reply queue", sessionId);
+                subscribeSessionReplies(sessionId);
             }
             messageBus.publish(QUEUE_TASK_CONFIG_CMD, forwardCmd, data);
         }

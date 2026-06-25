@@ -103,7 +103,7 @@ public class CarAgent {
             data.put("carId", carId);
             data.put("x", popped.getX());
             data.put("y", popped.getY());
-            messageBus.publish(QUEUE_CONTROLLER_CMD, CMD_BLOCKED, data);
+            messageBus.replyToController(sessionId, CMD_BLOCKED, data);
             return;
         }
 
@@ -148,7 +148,7 @@ public class CarAgent {
         }
         data.put("blockedX", blockedPos.getX());
         data.put("blockedY", blockedPos.getY());
-        messageBus.publish(QUEUE_CONTROLLER_CMD, CMD_BLOCKED, data);
+        messageBus.replyToController(sessionId, CMD_BLOCKED, data);
     }
 
     private void notifyController(String sessionId, String cmd, Point position) {
@@ -159,7 +159,7 @@ public class CarAgent {
             data.put("x", position.getX());
             data.put("y", position.getY());
         }
-        messageBus.publish(QUEUE_CONTROLLER_CMD, cmd, data);
+        messageBus.replyToController(sessionId, cmd, data);
     }
 
     public String getCarId() { return carId; }

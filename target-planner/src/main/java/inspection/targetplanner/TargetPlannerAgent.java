@@ -1,6 +1,5 @@
 package inspection.targetplanner;
 
-import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import inspection.common.blackboard.BlackboardClient;
 import inspection.common.messaging.MessageBus;
@@ -9,6 +8,8 @@ import inspection.common.model.Point;
 import inspection.common.util.Constants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import redis.clients.jedis.Jedis;
+import redis.clients.jedis.params.SetParams;
 
 import java.io.IOException;
 import java.util.*;
@@ -16,13 +17,14 @@ import java.util.*;
 public class TargetPlannerAgent implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(TargetPlannerAgent.class);
+    private static final int CLAIM_TTL_SEC = 30;
 
     private final BlackboardClient blackboard;
     private final MessageBus messageBus;
     private volatile boolean running = false;
 
-    /** 已分配的目标缓存 key = sessionId:targetXY */
-    private final Set<String> assignedThisBatch = new HashSet<>();
+    /** 当前批次的 tick，用于构造 claim key 前缀 */
+    private volatile long currentTick = 0;
 
     public TargetPlannerAgent(BlackboardClient blackboard, MessageBus messageBus) {
         this.blackboard = blackboard;
@@ -30,14 +32,16 @@ public class TargetPlannerAgent implements AutoCloseable {
     }
 
     public void start() throws IOException {
-        log.info("=== TargetPlanner starting ===");
+        log.info("=== TargetPlanner starting (multi-instance, Redis claims) ===");
         messageBus.declareKnowledgeSourceInput(Constants.QUEUE_TARGET_PLANNER_CMD);
 
         messageBus.subscribe(Constants.QUEUE_TARGET_PLANNER_CMD, (cmd, data, timestamp) -> {
             if (MessageType.ASSIGN_TARGET.equals(cmd)) {
                 handleAssignTarget(data);
             } else if (MessageType.RESET_BATCH.equals(cmd)) {
-                assignedThisBatch.clear();
+                if (data != null) {
+                    currentTick = data.getLongValue("tick", 0);
+                }
             }
         });
 
@@ -80,9 +84,14 @@ public class TargetPlannerAgent implements AutoCloseable {
         Point bestTarget = null;
         int bestDist = Integer.MAX_VALUE;
 
+        // claim key 前缀：targetClaim:{sessionId}:{tick}:
+        String claimPrefix = "targetClaim:" + sessionId + ":" + currentTick + ":";
+
         for (Point candidate : candidates) {
-            String key = sessionId + ":" + candidate.getX() + "," + candidate.getY();
-            if (assignedThisBatch.contains(key)) continue;
+            String claimKey = claimPrefix + candidate.getX() + "," + candidate.getY();
+
+            // 用 Redis SET NX 原子抢占，成功则获得分配权
+            if (!tryClaim(claimKey, carId)) continue;
 
             int dist = carPos.manhattanDistance(candidate);
             if (remaining > 1 && dist < Constants.MIN_TARGET_DISTANCE) continue;
@@ -95,7 +104,6 @@ public class TargetPlannerAgent implements AutoCloseable {
 
         if (bestTarget != null) {
             blackboard.setCarTarget(sessionId, carId, bestTarget);
-            assignedThisBatch.add(sessionId + ":" + bestTarget.getX() + "," + bestTarget.getY());
             log.info("[TargetPlanner] {}:{} → target ({},{}) distance={}",
                     sessionId, carId, bestTarget.getX(), bestTarget.getY(), bestDist);
 
@@ -104,6 +112,15 @@ public class TargetPlannerAgent implements AutoCloseable {
             notifyController(sessionId, assignments);
         } else {
             notifyController(sessionId, Collections.emptyList());
+        }
+    }
+
+    private boolean tryClaim(String key, String carId) {
+        try (Jedis jedis = blackboard.getJedisPool().getResource()) {
+            return "OK".equals(jedis.set(key, carId, SetParams.setParams().nx().ex(CLAIM_TTL_SEC)));
+        } catch (Exception e) {
+            log.warn("[TargetPlanner] claim failed: key={}, error={}", key, e.getMessage());
+            return false;
         }
     }
 
@@ -122,7 +139,7 @@ public class TargetPlannerAgent implements AutoCloseable {
         JSONObject data = new JSONObject();
         data.put("sessionId", sessionId);
         data.put("assignedCars", assignments);
-        messageBus.replyToController(MessageType.TARGET_ASSIGNED, data);
+        messageBus.replyToController(sessionId, MessageType.TARGET_ASSIGNED, data);
     }
 
     public boolean isRunning() { return running; }

@@ -74,13 +74,15 @@ class RabbitClient {
     console.log(`[MQ] 订阅 session: ${sessionId}`);
   }
 
-  /** 发送命令到 ControllerCmd（携带 sessionId） */
+  /** 发送命令到 Controller（智能路由：有 sessionId → 专属队列，无 → 共享队列） */
   publishCommand(cmd, data) {
     if (!this.channel) return;
+    const sid = (data && data.sessionId) ? data.sessionId : null;
+    const queue = sid ? `ControllerCmd_${sid}` : config.mq.controllerCmdQueue;
     const message = { cmd, data: data || {}, timestamp: Date.now() };
     try {
       this.channel.sendToQueue(
-        config.mq.controllerCmdQueue,
+        queue,
         Buffer.from(JSON.stringify(message)),
         { persistent: true }
       );

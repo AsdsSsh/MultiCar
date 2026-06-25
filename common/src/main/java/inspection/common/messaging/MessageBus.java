@@ -79,7 +79,6 @@ public class MessageBus {
 
     /** 声明共享队列（所有 session 共用，只需声明一次） */
     public void declareSharedQueues() throws IOException {
-        declareQueue(Constants.QUEUE_CONTROLLER_CMD);
         declareQueue(Constants.QUEUE_NAVIGATOR_CMD);
         declareQueue(Constants.QUEUE_TARGET_PLANNER_CMD);
         declareQueue(Constants.QUEUE_TASK_CONFIG_CMD);
@@ -227,11 +226,10 @@ public class MessageBus {
     }
 
     /**
-     * 回复消息给 Controller（发送到 ControllerCmd 队列）
-     * Navigator / TargetPlanner 等知识源用此方法回复 Controller
+     * 回复消息到指定 session 的 Controller 队列
      */
-    public void replyToController(String cmd, Object data) {
-        publish(Constants.QUEUE_CONTROLLER_CMD, cmd, data);
+    public void replyToController(String sessionId, String cmd, Object data) {
+        publish(Constants.getControllerCmdQueue(sessionId), cmd, data);
     }
 
     /**

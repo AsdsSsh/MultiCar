@@ -128,7 +128,7 @@ public class NavigatorAgent implements AutoCloseable {
         data.put("carId", carId);
         data.put("routeFound", routeFound);
         data.put("routeLength", routeLength);
-        messageBus.replyToController(MessageType.ROUTE_PLANNED, data);
+        messageBus.replyToController(sessionId, MessageType.ROUTE_PLANNED, data);
     }
 
     public boolean isRunning() { return running; }
