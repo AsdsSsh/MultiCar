@@ -59,6 +59,11 @@ class PushService {
 
   async pushStateUpdate(tick, sessionId) {
     try {
+      let subCount = 0;
+      for (const [, sessionSet] of this.sessions.entries()) {
+        if (sessionSet.has(sessionId)) subCount++;
+      }
+      console.log(`[PUSH] pushStateUpdate tick=${tick} session=${sessionId} subscribers=${subCount}`);
       const config = await this.reader.readTaskConfig(sessionId);
       const w = config.mapWidth || 40;
       const h = config.mapHeight || 30;

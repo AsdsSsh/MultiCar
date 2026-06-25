@@ -116,6 +116,7 @@ class WsHandler {
       // SET_CONFIG: 先切到新 session，取消旧订阅
       if (cmd === 'SET_CONFIG') {
         const sessionId = msg.data && msg.data.sessionId;
+        console.log(`[WS] SET_CONFIG sessionId=${sessionId || '(无)'}`);
         if (sessionId) {
           // 清除该 WS 的所有旧 session 绑定
           if (ws._sessions) {
@@ -124,6 +125,7 @@ class WsHandler {
           ws._sessions = new Set([sessionId]);
           this.pushService.subscribeToSession(ws, sessionId);
           this.rabbitClient.subscribeSession(sessionId);
+          console.log(`[WS] WS 已订阅 session: ${sessionId}`);
         }
       }
 

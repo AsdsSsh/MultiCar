@@ -88,7 +88,7 @@ public class ControllerAgent {
         }
     }
 
-    // ==================== 回复处理（per-session ControllerCmd_{id} 队列） ====================
+    // ==================== session 专属队列处理（回复 + Web 命令） ====================
 
     private void subscribeSessionReplies(String sessionId) {
         String queue = getControllerCmdQueue(sessionId);
@@ -98,14 +98,25 @@ public class ControllerAgent {
             log.error("Failed to declare session reply queue: {}", queue);
         }
         messageBus.subscribe(queue, (cmd, data, timestamp) -> {
-            log.debug("Session {} reply: cmd={}", sessionId, cmd);
+            log.debug("Session {} cmd: {}", sessionId, cmd);
             switch (cmd) {
+                // 初始化
+                case CMD_TASK_READY -> handleTaskReady(sessionId, data);
+                // 回复
                 case CMD_TARGET_ASSIGNED -> handleTargetAssigned(sessionId, data);
                 case CMD_ROUTE_PLANNED -> handleRoutePlanned(sessionId, data);
                 case CMD_MOVED -> handleMoved(sessionId, data);
                 case CMD_BLOCKED -> handleBlocked(sessionId, data);
                 case CMD_ROUTE_DONE -> handleRouteDone(sessionId, data);
-                default -> log.warn("Unknown reply for session {}: {}", sessionId, cmd);
+                // Web 命令
+                case CMD_PAUSE -> handlePause(sessionId);
+                case CMD_STOP -> handleStop(sessionId);
+                case CMD_RESUME -> handleResume(sessionId);
+                case CMD_STEP_ONCE -> handleStepOnce(sessionId);
+                case CMD_ADD_CAR -> handleAddCar(sessionId, data);
+                case CMD_DELETE_CAR -> handleDeleteCar(sessionId, data);
+                case CMD_MOVE_CAR -> handleMoveCar(sessionId, data);
+                default -> log.warn("Unknown cmd for session {}: {}", sessionId, cmd);
             }
         });
     }
@@ -450,12 +461,19 @@ public class ControllerAgent {
             default -> null;
         };
         if (forwardCmd != null) {
-            if (CMD_SET_CONFIG.equals(cmd) && (data == null || !data.containsKey("sessionId"))) {
-                String sessionId = UUID.randomUUID().toString().substring(0, 8);
-                data = data != null ? data : new JSONObject();
-                data.put("sessionId", sessionId);
-                log.info("Generated sessionId: {} for SET_CONFIG, subscribing reply queue", sessionId);
+            // SET_CONFIG 必须立即订阅 session 专属队列（无论 sessionId 来自客户端还是服务端生成）
+            if (CMD_SET_CONFIG.equals(cmd)) {
+                String sessionId;
+                if (data == null || !data.containsKey("sessionId")) {
+                    sessionId = UUID.randomUUID().toString().substring(0, 8);
+                    data = data != null ? data : new JSONObject();
+                    data.put("sessionId", sessionId);
+                    log.info("Generated sessionId: {} for SET_CONFIG", sessionId);
+                } else {
+                    sessionId = data.getString("sessionId");
+                }
                 subscribeSessionReplies(sessionId);
+                log.info("Subscribed reply queue for session: {}", sessionId);
             }
             messageBus.publish(QUEUE_TASK_CONFIG_CMD, forwardCmd, data);
         }

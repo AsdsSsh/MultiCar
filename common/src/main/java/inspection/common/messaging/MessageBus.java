@@ -79,6 +79,7 @@ public class MessageBus {
 
     /** 声明共享队列（所有 session 共用，只需声明一次） */
     public void declareSharedQueues() throws IOException {
+        declareQueue("ControllerCmd");
         declareQueue(Constants.QUEUE_NAVIGATOR_CMD);
         declareQueue(Constants.QUEUE_TARGET_PLANNER_CMD);
         declareQueue(Constants.QUEUE_TASK_CONFIG_CMD);
